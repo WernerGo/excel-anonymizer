@@ -1,5 +1,7 @@
 # excel-anonymizer
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Anonymize Excel files while preserving relationships across columns.
 
 **Key property:** identical values across all configured columns always get the same replacement — so relationships (e.g. employee → manager, or foreign keys across sheets) stay intact in the anonymized file.
