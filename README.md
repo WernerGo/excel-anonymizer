@@ -20,23 +20,26 @@ Example: `"Smith"` appears as employee last name (col B) and as manager last nam
 ## Installation
 
 ```bash
-python -m venv .venv
+# Install uv (once, no admin rights required)
 # Mac/Linux
-.venv/bin/pip install openpyxl pyyaml
-# Windows
-.venv\Scripts\pip install openpyxl pyyaml
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Install dependencies
+uv sync
 ```
 
 ## Usage
 
 ```bash
-# Mac/Linux
-python src/anonymize.py input.xlsx
-python src/anonymize.py input.xlsx --config examples/config_names.yaml
+# Generate sample data to try it out (no real Excel needed)
+uv run src/generate_sample.py
+uv run src/generate_sample.py --config examples/config_full.yaml --rows 50
 
-# Windows
-python src\anonymize.py input.xlsx
-python src\anonymize.py input.xlsx --config examples\config_names.yaml
+# Anonymize a file
+uv run src/anonymize.py input.xlsx
+uv run src/anonymize.py input.xlsx --config examples/config_names.yaml
 ```
 
 Output: `input_anonymized.xlsx` next to the original file.

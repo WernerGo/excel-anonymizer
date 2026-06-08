@@ -1,0 +1,10 @@
+[project]
+name = "excel-anonymizer"
+version = "0.1.0"
+description = "Anonymize Excel files by replacing cell values with unique, consistent keys"
+requires-python = ">=3.11"
+dependencies = [
+    "faker>=40.21.0",
+    "openpyxl>=3.1.5",
+    "pyyaml>=6.0.3",
+]

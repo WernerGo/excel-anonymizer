@@ -2,8 +2,9 @@
 anonymization_map.json
 *_map.json
 
-# Anonymized output files
+# Generated and anonymized output files
 *_anonymized.xlsx
+sample_data.xlsx
 
 # Python
 .venv/
