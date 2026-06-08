@@ -67,6 +67,6 @@ def infer_faker_type(group_name: str) -> str:
         return "department"
     if any(w in name for w in ("city", "location", "place", "ort", "standort")):
         return "city"
-    if any(w in name for w in ("company", "firma", "organisation")):
+    if any(w in name for w in ("compan", "firma", "organisation")):
         return "company"
     return "word"
