@@ -1,21 +1,21 @@
 # excel-anonymizer
 
-Anonymize Excel files by replacing cell values with unique, consistent keys.
+Anonymize Excel files while preserving relationships across columns.
 
-**Key property:** identical values across all configured columns always get the same key — so relationships (e.g. employee → manager, or foreign keys across sheets) are preserved in the anonymized file.
+**Key property:** identical values across all configured columns always get the same replacement — so relationships (e.g. employee → manager, or foreign keys across sheets) stay intact in the anonymized file.
 
 ## Use case
 
 You have an Excel file with personal data (names, departments, locations) that you want to share for testing, debugging, or review — without exposing real data. Classic tools either target databases or don't preserve cross-column relationships.
 
-## How it works
+## Tools
 
-1. Define which sheets and columns to anonymize in a YAML config file
-2. Run the script — it scans all configured columns and builds a value→key mapping
-3. The anonymized file is written with a suffix (e.g. `data_anonymized.xlsx`)
-4. Optionally saves a JSON mapping file so you can trace keys back to originals
-
-Example: `"Smith"` appears as employee last name (col B) and as manager last name (col D) → both get the same key `NAME0001`. The hierarchy stays intact.
+| Script | What it does |
+|--------|--------------|
+| `src/generate_sample.py` | Generate a realistic fake Excel from a config (no real data needed) |
+| `src/anonymize.py` | Replace values with abstract keys (`NAME0001`, `DEPT0002`, …) |
+| `src/faker_replace.py` | Replace values with realistic fake names/cities/companies via Faker |
+| `src/deanonymize.py` | _(planned)_ Restore originals from a saved mapping file |
 
 ## Installation
 
@@ -30,21 +30,31 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 uv sync
 ```
 
-## Usage
+## Quick start
 
 ```bash
-# Generate sample data to try it out (no real Excel needed)
-uv run src/generate_sample.py
-uv run src/generate_sample.py --config examples/config_full.yaml --rows 50
+# 1. Generate sample data to try it out (no real Excel needed)
+uv run src/generate_sample.py --config examples/config_faker.yaml
 
-# Anonymize a file
+# 2a. Anonymize with abstract keys
+uv run src/anonymize.py sample_data.xlsx --config examples/config_names.yaml
+
+# 2b. Or replace with realistic fake data
+uv run src/faker_replace.py sample_data.xlsx --config examples/config_faker.yaml
+```
+
+## anonymize.py — key replacement
+
+Replaces each unique value with a stable key (`PREFIX0001`, `PREFIX0002`, …).
+
+```bash
 uv run src/anonymize.py input.xlsx
 uv run src/anonymize.py input.xlsx --config examples/config_names.yaml
 ```
 
-Output: `input_anonymized.xlsx` next to the original file.
+Output: `input_anonymized.xlsx` next to the original.
 
-## Configuration
+Config:
 
 ```yaml
 output_suffix: "_anonymized"
@@ -54,25 +64,85 @@ groups:
   - name: person_names
     prefix: "NAME"
     columns:
-      - sheet: Employees     # sheet name
+      - sheet: Employees
         col: B               # column letter
         data_from_row: 2     # first data row (skip headers)
+      - sheet: Employees
+        col: D               # same mapping → relationship preserved
+        data_from_row: 2
+```
+
+## faker_replace.py — realistic fake data
+
+Replaces values with realistic fake names, cities, companies etc. via [Faker](https://faker.readthedocs.io/). Same original value always gets the same fake replacement.
+
+```bash
+uv run src/faker_replace.py input.xlsx
+uv run src/faker_replace.py input.xlsx --config examples/config_faker.yaml
+uv run src/faker_replace.py input.xlsx --locale de_DE
+```
+
+Output: `input_faker.xlsx` next to the original.
+
+Config:
+
+```yaml
+output_suffix: "_faker"
+save_mapping: "faker_map.json"
+locale: en_US                # any Faker locale: de_DE, fr_FR, ja_JP, …
+
+groups:
+  - name: last_names
+    faker_type: last_name    # see supported types below
+    columns:
+      - sheet: Employees
+        col: B
+        data_from_row: 2
+      - sheet: Employees
+        col: D               # manager column — same fake value as employee
+        data_from_row: 2
+
+  - name: first_names
+    faker_type: first_name
+    columns:
       - sheet: Employees
         col: C
         data_from_row: 2
 ```
 
-- **Groups** are independent — values are only shared within a group, not across groups
-- **Multiple groups** let you use different prefixes for names, departments, locations, etc.
-- **`data_from_row`** skips header rows; defaults to `2`
+**Supported `faker_type` values:**
 
-See `examples/` for ready-to-use configs.
+| Type | Example output |
+|------|----------------|
+| `last_name` | Smith |
+| `first_name` | Emily |
+| `full_name` | Emily Smith |
+| `company` | Acme Corp |
+| `city` | Berlin |
+| `department` | Engineering |
+| `email` | e.smith@example.com |
+| `word` | Alpha |
 
-## Planned extensions
+## generate_sample.py — create test data
 
-- `src/faker_replace.py` — replace keys with realistic fake names via [Faker](https://faker.readthedocs.io/)
-- `src/deanonymize.py` — restore original values using a saved mapping file
+Generates a fake Excel file matching the structure of a config. Uses `faker_type` when configured, otherwise infers it from the group name.
+
+```bash
+uv run src/generate_sample.py
+uv run src/generate_sample.py --config examples/config_faker.yaml
+uv run src/generate_sample.py --config examples/config_full.yaml --rows 50 --output my_sample.xlsx
+```
+
+Values are drawn from a small pool with repetition — so the same name appears as both employee and manager, demonstrating relationship preservation.
+
+## Config examples
+
+| File | Use case |
+|------|----------|
+| `examples/config_names.yaml` | Key replacement for person names |
+| `examples/config_full.yaml` | Key replacement for names, departments, locations |
+| `examples/config_faker.yaml` | Faker replacement with separate groups for last/first names |
 
 ## Security note
 
-The mapping file (`anonymization_map.json`) contains the original values and is excluded from version control via `.gitignore`. Keep it local.
+Mapping files (`*_map.json`) contain the original values and are excluded from version control via `.gitignore`. All `.xlsx` files are excluded as well. Keep both local.
