@@ -21,19 +21,7 @@ import openpyxl
 import yaml
 from faker import Faker
 
-fake = Faker()
-
-
-def _fake_value(group_name: str) -> str:
-    """Generate a plausible fake value based on the group name."""
-    name = group_name.lower()
-    if any(w in name for w in ("name", "person", "employee", "user", "mitarbeiter")):
-        return fake.last_name()
-    if any(w in name for w in ("department", "dept", "abteilung", "kostenstelle", "cost")):
-        return random.choice(["Finance", "Engineering", "Operations", "Legal", "Product", "Sales"])
-    if any(w in name for w in ("location", "place", "city", "ort", "standort")):
-        return fake.city()
-    return fake.word().capitalize()
+from faker_utils import infer_faker_type, make_generator
 
 
 def generate(config_path: Path, output_path: Path, rows: int = 30) -> None:
@@ -56,13 +44,18 @@ def generate(config_path: Path, output_path: Path, rows: int = 30) -> None:
         name: wb.create_sheet(name) for name in sheet_cols
     }
 
+    locale = config.get("locale", "en_US")
+    fake   = Faker(locale)
+
     # Fill columns group by group
     for group in config.get("groups", []):
-        group_name = group["name"]
+        group_name  = group["name"]
+        faker_type  = group.get("faker_type") or infer_faker_type(group_name)
+        generate    = make_generator(faker_type, fake)
 
         # Small pool → many repetitions → relationships to preserve
         pool_size = max(4, rows // 5)
-        pool = [_fake_value(group_name) for _ in range(pool_size)]
+        pool = [generate() for _ in range(pool_size)]
 
         for col_spec in group["columns"]:
             sheet_name = col_spec["sheet"]

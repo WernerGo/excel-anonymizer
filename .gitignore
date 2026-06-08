@@ -1,5 +1,4 @@
 # Mapping files contain original (real) values – never commit
-anonymization_map.json
 *_map.json
 
 # Generated and anonymized output files

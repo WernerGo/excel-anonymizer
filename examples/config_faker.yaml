@@ -1,0 +1,56 @@
+# Example config for faker_replace.py
+#
+# faker_type controls what kind of fake data is generated per group.
+# Supported types:
+#   last_name   – realistic last names
+#   first_name  – realistic first names
+#   full_name   – full names ("John Smith")
+#   company     – company names
+#   city        – city names
+#   department  – department names (Engineering, Finance, ...)
+#   email       – email addresses
+#   word        – generic capitalized word
+#
+# locale: optional Faker locale, e.g. de_DE, en_US, fr_FR (default: en_US)
+#
+# Relationship preservation: identical values within a group always get
+# the same fake replacement — so employee/manager links stay intact.
+
+output_suffix: "_faker"
+save_mapping: "faker_map.json"
+locale: en_US
+
+groups:
+  - name: last_names
+    faker_type: last_name
+    columns:
+      - sheet: Sheet1
+        col: A            # employee last name
+        data_from_row: 2
+      - sheet: Sheet1
+        col: C            # manager last name
+        data_from_row: 2
+
+  - name: first_names
+    faker_type: first_name
+    columns:
+      - sheet: Sheet1
+        col: B            # employee first name
+        data_from_row: 2
+      - sheet: Sheet1
+        col: D            # manager first name
+        data_from_row: 2
+
+  - name: departments
+    faker_type: department
+    columns:
+      - sheet: Sheet1
+        col: E
+        data_from_row: 2
+
+  - name: locations
+    faker_type: city
+    columns:
+      - sheet: Sheet1
+        col: F
+        data_from_row: 2
