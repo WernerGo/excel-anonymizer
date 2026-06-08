@@ -19,6 +19,12 @@ import openpyxl
 
 
 def deanonymize(excel_path: Path, mapping_path: Path) -> None:
+    """Restore original cell values using an inverted anonymization mapping.
+
+    Args:
+        excel_path: Path to the anonymized Excel file (.xlsx).
+        mapping_path: Path to the JSON mapping file saved by ``anonymize.py`` or ``faker_replace.py``.
+    """
     mapping_data: dict[str, dict[str, str]] = json.loads(
         mapping_path.read_text(encoding="utf-8")
     )
@@ -46,6 +52,7 @@ def deanonymize(excel_path: Path, mapping_path: Path) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and run the deanonymization."""
     parser = argparse.ArgumentParser(
         description="Restore original Excel values from an anonymization mapping"
     )

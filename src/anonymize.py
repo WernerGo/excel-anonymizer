@@ -22,6 +22,12 @@ import yaml
 
 
 def anonymize(excel_path: Path, config_path: Path) -> None:
+    """Replace configured cell values with stable keys and optionally save the mapping.
+
+    Args:
+        excel_path: Path to the input Excel file (.xlsx).
+        config_path: Path to the YAML config defining groups, prefixes, and columns.
+    """
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     suffix   = config.get("output_suffix", "_anonymized")
@@ -80,6 +86,7 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and run the anonymization."""
     parser = argparse.ArgumentParser(
         description="Anonymize Excel files by replacing cell values with unique keys"
     )

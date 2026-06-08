@@ -55,7 +55,14 @@ def make_generator(faker_type: str, fake: Faker):
 
 
 def infer_faker_type(group_name: str) -> str:
-    """Guess a faker_type from the group name when none is configured."""
+    """Guess a faker_type from the group name when none is configured.
+
+    Args:
+        group_name: The ``name`` field of a config group (e.g. ``last_names``, ``abteilung``).
+
+    Returns:
+        A supported faker_type string (falls back to ``"word"`` if no keyword matches).
+    """
     name = group_name.lower()
     if any(w in name for w in ("last", "nachname", "surname")):
         return "last_name"

@@ -15,7 +15,7 @@ You have an Excel file with personal data (names, departments, locations) that y
 | `src/generate_sample.py` | Generate a realistic fake Excel from a config (no real data needed) |
 | `src/anonymize.py` | Replace values with abstract keys (`NAME0001`, `DEPT0002`, …) |
 | `src/faker_replace.py` | Replace values with realistic fake names/cities/companies via Faker |
-| `src/deanonymize.py` | _(planned)_ Restore originals from a saved mapping file |
+| `src/deanonymize.py` | Restore original values from a mapping file saved by `anonymize.py` or `faker_replace.py` |
 
 ## Installation
 
@@ -122,6 +122,19 @@ groups:
 | `department` | Engineering |
 | `email` | e.smith@example.com |
 | `word` | Alpha |
+
+## deanonymize.py — restore originals
+
+Reverses an anonymized file back to the original values using the mapping file saved during anonymization. Works with both `anonymize.py` and `faker_replace.py` mappings.
+
+```bash
+uv run src/deanonymize.py sample_data_anonymized.xlsx --mapping anonymization_map.json
+uv run src/deanonymize.py sample_data_faker.xlsx --mapping faker_map.json
+```
+
+Output: `<input>_restored.xlsx` next to the input file.
+
+> **Note:** The mapping file must not have been deleted or excluded. By default both mapping files are `.gitignore`d and kept local only — see the [Security note](#security-note) below.
 
 ## generate_sample.py — create test data
 

@@ -25,6 +25,13 @@ from faker_utils import infer_faker_type, make_generator
 
 
 def generate(config_path: Path, output_path: Path, rows: int = 30) -> None:
+    """Create a sample Excel file with fake data matching the given config structure.
+
+    Args:
+        config_path: Path to the YAML config defining sheets, columns, and faker types.
+        output_path: Destination path for the generated Excel file (.xlsx).
+        rows: Number of data rows to write per sheet (default: 30).
+    """
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     wb = openpyxl.Workbook()
@@ -81,6 +88,7 @@ def generate(config_path: Path, output_path: Path, rows: int = 30) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and generate the sample Excel file."""
     parser = argparse.ArgumentParser(
         description="Generate a sample Excel file from an anonymize config"
     )

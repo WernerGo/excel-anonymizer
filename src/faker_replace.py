@@ -29,6 +29,13 @@ from faker_utils import make_generator
 
 
 def faker_replace(excel_path: Path, config_path: Path, locale_override: str | None = None) -> None:
+    """Replace configured cell values with realistic fake data and optionally save the mapping.
+
+    Args:
+        excel_path: Path to the input Excel file (.xlsx).
+        config_path: Path to the YAML config defining groups, faker types, and columns.
+        locale_override: Faker locale (e.g. ``de_DE``) that takes precedence over the config value.
+    """
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     locale = locale_override or config.get("locale", "en_US")
@@ -95,6 +102,7 @@ def faker_replace(excel_path: Path, config_path: Path, locale_override: str | No
 
 
 def main() -> None:
+    """Parse CLI arguments and run the Faker-based replacement."""
     parser = argparse.ArgumentParser(
         description="Anonymize Excel files with realistic fake data via Faker"
     )
