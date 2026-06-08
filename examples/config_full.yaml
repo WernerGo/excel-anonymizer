@@ -1,0 +1,44 @@
+# Example: anonymize multiple independent groups in one pass
+#
+# Each group has its own key space and prefix.
+# Values are only shared within a group, not across groups.
+
+output_suffix: "_anonymized"
+save_mapping: "anonymization_map.json"
+
+groups:
+  # Group 1: person names (shared key space across all name columns)
+  - name: person_names
+    prefix: "PERSON"
+    columns:
+      - sheet: Employees
+        col: B          # last name
+        data_from_row: 2
+      - sheet: Employees
+        col: C          # first name
+        data_from_row: 2
+      - sheet: Employees
+        col: D          # manager last name
+        data_from_row: 2
+      - sheet: Employees
+        col: E          # manager first name
+        data_from_row: 2
+
+  # Group 2: department / cost center names
+  - name: departments
+    prefix: "DEPT"
+    columns:
+      - sheet: Employees
+        col: F          # department
+        data_from_row: 2
+      - sheet: Departments
+        col: A          # department list
+        data_from_row: 2
+
+  # Group 3: locations
+  - name: locations
+    prefix: "LOC"
+    columns:
+      - sheet: Employees
+        col: G          # office location
+        data_from_row: 2

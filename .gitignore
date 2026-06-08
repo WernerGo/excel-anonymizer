@@ -1,0 +1,13 @@
+# Mapping files contain original (real) values – never commit
+anonymization_map.json
+*_map.json
+
+# Anonymized output files
+*_anonymized.xlsx
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store

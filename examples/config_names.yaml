@@ -1,0 +1,32 @@
+# Example: anonymize person names across multiple columns
+#
+# All columns in a group share the same value→key mapping.
+# This preserves relationships: if "Smith" appears as both an employee
+# and a manager, both occurrences get the same key.
+#
+# output_suffix : appended to the filename of the anonymized output
+# save_mapping  : JSON file with the original→key mapping (for reference/reversal)
+
+output_suffix: "_anonymized"
+save_mapping: "anonymization_map.json"
+
+groups:
+  - name: person_names
+    prefix: "NAME"
+    columns:
+      # Employee last name
+      - sheet: Sheet1
+        col: A
+        data_from_row: 2
+      # Employee first name
+      - sheet: Sheet1
+        col: B
+        data_from_row: 2
+      # Manager last name
+      - sheet: Sheet1
+        col: C
+        data_from_row: 2
+      # Manager first name
+      - sheet: Sheet1
+        col: D
+        data_from_row: 2
