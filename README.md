@@ -4,6 +4,14 @@ Anonymize Excel files while preserving relationships across columns.
 
 **Key property:** identical values across all configured columns always get the same replacement — so relationships (e.g. employee → manager, or foreign keys across sheets) stay intact in the anonymized file.
 
+## Motivation
+
+Excel is still the dominant data format in many organizations — reporting, controlling, HR, and operations all live in spreadsheets. AI tools are increasingly useful for analyzing that data, but they introduce a new risk: to build or improve an analysis script with AI assistance, you often have to share the data with a developer or paste it into a prompt — exposing names, salaries, or other sensitive information that most people should never see.
+
+The safest approach is to keep both code and data local. But even then, when you collaborate with a developer or ask an AI to help write analysis code, you need realistic data that behaves like the real thing — without being the real thing.
+
+**excel-anonymizer** solves this: replace sensitive values in your Excel files with either abstract keys or realistic-looking fakes, share or use the result freely, and restore the originals any time via the saved mapping.
+
 ## Use case
 
 You have an Excel file with personal data (names, departments, locations) that you want to share for testing, debugging, or review — without exposing real data. Classic tools either target databases or don't preserve cross-column relationships.
