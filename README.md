@@ -30,7 +30,7 @@ You have an Excel file with personal data (names, departments, locations) that y
 ## Installation
 
 ```bash
-# Install uv (once, no admin rights required)
+# Install uv (once, no admin rights required, no Python needed beforehand — uv manages Python itself)
 # Mac/Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 # Windows (PowerShell)
