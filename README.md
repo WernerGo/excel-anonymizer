@@ -109,6 +109,27 @@ WARNING: 930 formula cells carry no calculated result and arrive empty.
          Open the source in Excel, let it recalculate, save, and run again.
 ```
 
+### Sheets that should not travel at all
+
+A workbook usually carries more than its data: working views, report
+layouts, exports to another system. Those sheets repeat the values of
+the data sheets in a different arrangement, so anonymizing the data
+sheets alone leaves the file full of originals. Removing them is simpler
+and more complete than replacing them column by column:
+
+```yaml
+ignore_sheets:
+  - sheet: Overview
+    reason: a working view assembled from the data sheets
+  - sheet: Export
+    reason: an export to another system, not an input
+```
+
+A plain list of names works too; the reason is for whoever has to agree
+that these sheets are dispensable. Removing every sheet is refused, and
+a sheet that is not in the file only warns — one list often serves
+several files of the same family.
+
 ### Numbers: scaling instead of replacing
 
 Amounts are confidential too, but replacing them with keys destroys
@@ -141,6 +162,21 @@ Two rules follow from that:
 
 Scaling is one-way — rounding loses the remainder — so scale groups are
 not written to the mapping file.
+
+### Keys and numbers
+
+A key is text, so writing one over a number changes the type of that
+column. Key groups therefore skip numeric cells: a column of amounts
+with a stray text cell in it stays a column of amounts. Where a numeric
+value really has to go — a tax number, an account number — the group
+says so:
+
+```yaml
+  - name: tax_numbers
+    prefix: "TAXNO"
+    include_numbers: true
+    columns: [...]
+```
 
 ## faker_replace.py — realistic fake data
 

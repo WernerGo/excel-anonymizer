@@ -87,6 +87,41 @@ def count_uncached_formulas(excel_path: Path) -> int:
     return missing
 
 
+def drop_sheets(wb: openpyxl.Workbook, entries: list) -> None:
+    """Remove sheets that are not part of what is being passed on.
+
+    A workbook usually carries more than the data someone needs from it:
+    working views, report layouts, exports to another system. Those
+    sheets hold the same values as the data sheets, so anonymizing the
+    data sheets alone leaves the file full of originals. Removing them
+    is both simpler and more complete than replacing them column by
+    column.
+
+    Each entry names a sheet and, where it is written that way, the
+    reason it can go — the list is meant to be read by whoever has to
+    agree that these sheets are dispensable.
+
+    Args:
+        wb: The open workbook.
+        entries: Sheet names, or mappings with ``sheet`` and ``reason``.
+    """
+    names = [entry["sheet"] if isinstance(entry, dict) else entry for entry in entries]
+    names = [str(name) for name in names]
+
+    if names and not set(wb.sheetnames) - set(names):
+        raise ValueError("ignore_sheets would remove every sheet")
+
+    for name in names:
+        if name not in wb.sheetnames:
+            print(f"  WARNING: sheet '{name}' listed for removal but not in the file.")
+            continue
+        del wb[name]
+
+    removed = [name for name in names if name not in wb.sheetnames]
+    if removed:
+        print(f"  Removed {len(removed)} sheets that are not part of the delivery.")
+
+
 def scale_value(value: object, factor: float) -> object | None:
     """Return the value multiplied by the factor, keeping the type it had.
 
@@ -151,11 +186,19 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
         raise ValueError(f"group {group['name']!r}: a key group needs a prefix")
 
     prefix = group["prefix"]
+    numbers_too = group.get("include_numbers", False)
     mapping: dict[str, str] = OrderedDict()
     replacements: list[tuple] = []
 
     for ws, row_idx, col_idx in iter_cells(wb, group["columns"]):
         cell = ws.cell(row=row_idx, column=col_idx)
+        if isinstance(cell.value, (int, float)) and not numbers_too:
+            # A key is text. Writing one over a number changes the type of
+            # the column, which is a change to the file's shape rather than
+            # to its content — and columns holding text among numbers are
+            # common enough that keying them silently would be a trap. A
+            # group that does mean to replace numbers says `include_numbers`.
+            continue
         val = str(cell.value).strip() if cell.value is not None else ""
         if not val or val in ("None", "nan"):
             continue
@@ -233,6 +276,8 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
         if uncached:
             print(f"  WARNING: {uncached} formula cells carry no calculated result and arrive empty.")
             print("           Open the source in Excel, let it recalculate, save, and run again.")
+
+    drop_sheets(wb, config.get("ignore_sheets", []))
 
     full_mapping: dict[str, dict[str, str]] = {}
 

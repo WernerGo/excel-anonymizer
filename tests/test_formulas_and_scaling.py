@@ -192,3 +192,125 @@ def test_scale_groups_are_not_written_to_the_mapping(excel_with_formulas, tmp_pa
 
     mapping = json.loads((excel_with_formulas.parent / "map.json").read_text())
     assert set(mapping) == {"names"}
+
+
+# ---------------------------------------------------------------------------
+# ignore_sheets
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def excel_with_a_working_sheet(tmp_path: Path) -> Path:
+    """A workbook with a data sheet and a working view repeating its values."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.cell(1, 1, "name");  ws.cell(2, 1, "Smith")
+
+    view = wb.create_sheet("Overview")
+    view.cell(1, 1, "name");  view.cell(2, 1, "Smith")
+
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_listed_sheet_is_removed(excel_with_a_working_sheet, tmp_path):
+    """The whole point: a sheet that is gone cannot carry an original value."""
+    config = write_config(
+        tmp_path,
+        {"ignore_sheets": [{"sheet": "Overview", "reason": "a view of Data"}], "groups": []},
+    )
+    anonymize(excel_with_a_working_sheet, config)
+
+    out = excel_with_a_working_sheet.with_stem(excel_with_a_working_sheet.stem + "_anonymized")
+    assert openpyxl.load_workbook(out).sheetnames == ["Data"]
+
+
+def test_a_plain_list_of_names_works_too(excel_with_a_working_sheet, tmp_path):
+    """The reason is for the reader; the tool does not insist on it."""
+    config = write_config(tmp_path, {"ignore_sheets": ["Overview"], "groups": []})
+    anonymize(excel_with_a_working_sheet, config)
+
+    out = excel_with_a_working_sheet.with_stem(excel_with_a_working_sheet.stem + "_anonymized")
+    assert openpyxl.load_workbook(out).sheetnames == ["Data"]
+
+
+def test_removing_every_sheet_is_refused(excel_with_a_working_sheet, tmp_path):
+    """An empty workbook cannot be saved, and would not be wanted anyway."""
+    config = write_config(tmp_path, {"ignore_sheets": ["Data", "Overview"], "groups": []})
+
+    with pytest.raises(ValueError, match="every sheet"):
+        anonymize(excel_with_a_working_sheet, config)
+
+
+def test_a_sheet_that_is_not_there_only_warns(excel_with_a_working_sheet, tmp_path, capsys):
+    """One list serves several files of the same family; not all carry every sheet."""
+    config = write_config(tmp_path, {"ignore_sheets": ["Gone", "Overview"], "groups": []})
+    anonymize(excel_with_a_working_sheet, config)
+
+    assert "not in the file" in capsys.readouterr().out
+
+
+def test_a_removed_sheet_takes_its_values_with_it(excel_with_a_working_sheet, tmp_path):
+    """Anonymizing the data sheet alone would leave the copy in the view."""
+    config = write_config(
+        tmp_path,
+        {
+            "ignore_sheets": ["Overview"],
+            "groups": [
+                {"name": "names", "prefix": "NAME", "columns": [{"sheet": "Data", "col": "A", "data_from_row": 2}]}
+            ],
+        },
+    )
+    anonymize(excel_with_a_working_sheet, config)
+
+    out = excel_with_a_working_sheet.with_stem(excel_with_a_working_sheet.stem + "_anonymized")
+    book = openpyxl.load_workbook(out)
+    values = [cell.value for sheet in book.worksheets for row in sheet.iter_rows() for cell in row]
+    assert "Smith" not in values
+
+
+# ---------------------------------------------------------------------------
+# keys and numbers
+# ---------------------------------------------------------------------------
+
+def test_a_key_group_leaves_numbers_alone(excel_with_formulas, tmp_path):
+    """A column of amounts with one text cell in it must stay a column of amounts."""
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "mixed",
+                    "prefix": "X",
+                    "columns": [{"sheet": "Sheet1", "col": "B", "data_from_row": 2}],
+                }
+            ]
+        },
+    )
+    anonymize(excel_with_formulas, config)
+
+    ws = openpyxl.load_workbook(excel_with_formulas.with_stem(excel_with_formulas.stem + "_anonymized"))["Sheet1"]
+    assert ws.cell(2, 2).value == 1000
+    assert ws.cell(3, 2).value == 1500.5
+
+
+def test_include_numbers_says_so_explicitly(excel_with_formulas, tmp_path):
+    """A tax number is numeric and still has to go — but the config has to ask."""
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "tax",
+                    "prefix": "TAXNO",
+                    "include_numbers": True,
+                    "columns": [{"sheet": "Sheet1", "col": "B", "data_from_row": 2}],
+                }
+            ]
+        },
+    )
+    anonymize(excel_with_formulas, config)
+
+    ws = openpyxl.load_workbook(excel_with_formulas.with_stem(excel_with_formulas.stem + "_anonymized"))["Sheet1"]
+    assert ws.cell(2, 2).value.startswith("TAXNO")
