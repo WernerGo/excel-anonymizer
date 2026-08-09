@@ -438,3 +438,47 @@ def test_keeping_the_formulas_keeps_the_column_formula(tmp_path):
     out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
     formulas = [c.calculatedColumnFormula for t in out["Data"].tables.values() for c in t.tableColumns]
     assert any(formula is not None for formula in formulas)
+
+
+# ---------------------------------------------------------------------------
+# sheets nobody mentioned
+# ---------------------------------------------------------------------------
+
+def test_a_sheet_in_no_list_is_reported(excel_with_a_working_sheet, tmp_path, capsys):
+    """The next export carries a sheet the config was never written against."""
+    config = write_config(
+        tmp_path,
+        {"groups": [{"name": "n", "prefix": "N", "columns": [{"sheet": "Data", "col": "A"}]}]},
+    )
+    anonymize(excel_with_a_working_sheet, config)
+
+    assert "Overview" in capsys.readouterr().out
+
+
+def test_fail_refuses_to_write_a_file_with_an_unlisted_sheet(excel_with_a_working_sheet, tmp_path):
+    """Where the output must be free of originals, unconsidered is not good enough."""
+    config = write_config(
+        tmp_path,
+        {
+            "unlisted_sheets": "fail",
+            "groups": [{"name": "n", "prefix": "N", "columns": [{"sheet": "Data", "col": "A"}]}],
+        },
+    )
+    with pytest.raises(ValueError, match="unaccounted"):
+        anonymize(excel_with_a_working_sheet, config)
+
+
+def test_an_ignored_sheet_counts_as_accounted_for(excel_with_a_working_sheet, tmp_path):
+    """Dropping a sheet is a decision about it, so it satisfies the check."""
+    config = write_config(
+        tmp_path,
+        {
+            "unlisted_sheets": "fail",
+            "ignore_sheets": ["Overview"],
+            "groups": [{"name": "n", "prefix": "N", "columns": [{"sheet": "Data", "col": "A"}]}],
+        },
+    )
+    anonymize(excel_with_a_working_sheet, config)
+
+    out = excel_with_a_working_sheet.with_stem(excel_with_a_working_sheet.stem + "_anonymized")
+    assert openpyxl.load_workbook(out).sheetnames == ["Data"]

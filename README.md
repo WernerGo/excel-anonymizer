@@ -137,6 +137,25 @@ that these sheets are dispensable. Removing every sheet is refused, and
 a sheet that is not in the file only warns — one list often serves
 several files of the same family.
 
+### Sheets nobody mentioned
+
+A configuration is written against the file you had. The next export can
+carry a sheet nobody has seen, and it passes through untouched — with
+its values — because nothing refers to it.
+
+```yaml
+unlisted_sheets: fail   # or warn, the default
+
+keep_sheets:
+  - sheet: Codes
+    reason: a list of currency codes, no client data in it
+```
+
+A sheet counts as accounted for by being named in a group, by being
+removed through `ignore_sheets`, or by standing in `keep_sheets`. Use
+`fail` wherever the output is supposed to be free of original values:
+that can only be claimed for a file whose every sheet was considered.
+
 Defined names that pointed at a removed sheet go with it. Left behind,
 they make Excel ask about links on every open and then fail to resolve
 them.

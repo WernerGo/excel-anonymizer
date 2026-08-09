@@ -188,6 +188,56 @@ def clear_calculated_columns(wb: openpyxl.Workbook) -> None:
         print(f"  Cleared {cleared} table column formulas that no longer describe the cells.")
 
 
+def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode: str) -> None:
+    """Report sheets that neither a group nor `ignore_sheets` mentions.
+
+    A configuration is written against the file you had. The next export
+    can carry a sheet nobody has seen, and it passes through untouched —
+    with its values — because nothing refers to it. That is the failure
+    this guards: not a wrong rule, but a missing one.
+
+    A sheet counts as accounted for if a group names it, if
+    ``ignore_sheets`` removes it, or if ``keep_sheets`` says it stays as
+    it is. The third is needed as often as the other two: a sheet can be
+    empty, or hold nothing but a list of currency codes.
+
+    ``warn`` names them and continues; ``fail`` refuses. Use ``fail``
+    wherever the output is supposed to be free of original values, which
+    can only be claimed for a file whose every sheet was considered.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+        mode: ``warn`` or ``fail``.
+
+    Raises:
+        ValueError: In ``fail`` mode, if any sheet is unaccounted for.
+    """
+    if mode not in ("warn", "fail"):
+        raise ValueError(f"unlisted_sheets: {mode!r} — expected 'warn' or 'fail'")
+
+    named = {
+        str(col["sheet"])
+        for group in config.get("groups", [])
+        for col in group.get("columns", [])
+    }
+    named |= {
+        str(entry["sheet"]) if isinstance(entry, dict) else str(entry)
+        for entry in config.get("keep_sheets", [])
+    }
+    unlisted = [name for name in wb.sheetnames if name not in named]
+    if not unlisted:
+        return
+
+    print(f"  {len(unlisted)} sheets are in the file but in no group and not in ignore_sheets:")
+    for name in unlisted:
+        print(f"    {name}")
+    if mode == "fail":
+        raise ValueError(
+            f"{len(unlisted)} sheets are unaccounted for; list them in a group or in ignore_sheets"
+        )
+
+
 def scale_value(value: object, factor: float) -> object | None:
     """Return the value multiplied by the factor, keeping the type it had.
 
@@ -344,6 +394,7 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             print("           Open the source in Excel, let it recalculate, save, and run again.")
 
     drop_sheets(wb, config.get("ignore_sheets", []))
+    check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"))
 
     if formulas == "values":
         clear_calculated_columns(wb)
