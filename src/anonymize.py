@@ -232,6 +232,143 @@ def clear_calculated_columns(wb: openpyxl.Workbook) -> None:
         print(f"  Cleared {cleared} table column formulas that no longer describe the cells.")
 
 
+def drop_hyperlink(cell) -> None:
+    """Remove the link on a cell whose value has just been replaced.
+
+    A hyperlink is not stored in the cell. It is a relationship of the
+    sheet, and it survives every change to the value it sits under — so
+    a column of email addresses replaced by keys keeps the addresses, in
+    a part of the file no comparison of cell values will ever look at.
+    The `loan_agent_contact` column of one workbook carried sixteen of
+    them into the output, complete with the names in front of the `@`.
+
+    Once the value is a key, whatever the link pointed at is not what the
+    cell says any more, so it goes.
+
+    Args:
+        cell: The cell that was just written.
+    """
+    if cell.hyperlink is not None:
+        cell.hyperlink = None
+
+
+def report_surviving_hyperlinks(wb: openpyxl.Workbook) -> None:
+    """Say where links are left, without saying what they point at.
+
+    Anything still linked was not replaced, which may be right — a link
+    to a public register is not client data. It has to be visible, so it
+    is counted per sheet. The targets themselves are not printed: they
+    are exactly the sort of thing that must not leave the machine.
+
+    Args:
+        wb: The open workbook.
+    """
+    remaining = {ws.title: len(ws._hyperlinks) for ws in wb.worksheets if ws._hyperlinks}
+    if remaining:
+        where = ", ".join(f"{name} ({count})" for name, count in sorted(remaining.items()))
+        print(f"  WARNING: {sum(remaining.values())} hyperlinks are still in the file: {where}.")
+        print("           A link keeps its target when the cell under it is replaced.")
+
+
+def clear_document_properties(wb: openpyxl.Workbook) -> None:
+    """Empty the properties of the file itself.
+
+    A workbook records who created it and who saved it last, by full
+    name, and it carries whatever custom properties the organisation's
+    systems attached — in one file the classification label of a document
+    protection service, with the email address of the person who applied
+    it and the tenant it belongs to.
+
+    None of that is in a cell, so nothing that compares cells will find
+    it. Two derived files were already called clean while naming four
+    people between them.
+
+    The dates are kept: they say nothing about anyone, and a file with no
+    timestamps looks stranger than it is.
+
+    Args:
+        wb: The open workbook.
+    """
+    properties = wb.properties
+    named = [properties.creator, properties.lastModifiedBy, properties.lastPrinted]
+    for field in ("creator", "lastModifiedBy", "title", "subject", "description", "keywords", "category", "identifier", "language", "lastPrinted", "revision", "version"):
+        if hasattr(properties, field):
+            setattr(properties, field, None)
+
+    custom = len(wb.custom_doc_props.props) if wb.custom_doc_props is not None else 0
+    if custom:
+        wb.custom_doc_props.props = []
+
+    if any(named) or custom:
+        print(f"  Cleared the document properties, including {custom} custom ones.")
+
+
+def strip_comments(wb: openpyxl.Workbook) -> int:
+    """Remove every cell comment, and say how many there were.
+
+    A comment is prose hanging off a cell, and prose cannot be checked
+    for names cheaply — which is the same argument that puts free text
+    columns into a replacement group rather than leaving them alone. In
+    one workbook the comments named five companies of a borrower group,
+    an arranging bank, a colleague by first name, and the date a payment
+    arrived late.
+
+    Nothing reads them. They are notes between the people who keep the
+    file, so they are removed rather than replaced: a key in place of a
+    sentence tells the reader of the derived file nothing either.
+
+    Args:
+        wb: The open workbook.
+
+    Returns:
+        The number of comments removed.
+    """
+    removed = 0
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.comment is not None:
+                    cell.comment = None
+                    removed += 1
+    if removed:
+        print(f"  Removed {removed} cell comments; they are notes between people, and prose cannot be checked.")
+    return removed
+
+
+def demote_query_tables(wb: openpyxl.Workbook) -> None:
+    """Turn tables that were fed by a query into ordinary tables.
+
+    A table can be the result of an external query — a currency history
+    pulled from a data source, say. The workbook then holds the query and
+    the connection beside the table, and the table declares itself a
+    query table that refers to them.
+
+    openpyxl does not carry the query or the connection over, but it does
+    write the declaration back. Excel opens the file, finds a table that
+    says it is fed by a query that is not there, and offers to repair the
+    workbook — which is a frightening thing to hand someone together with
+    the assurance that the file is sound.
+
+    The data is already in the sheet and nothing is going to refresh it
+    here, so the honest form is a plain table.
+
+    Args:
+        wb: The open workbook.
+    """
+    demoted = 0
+    for ws in wb.worksheets:
+        for table in ws.tables.values():
+            if table.tableType is None:
+                continue
+            table.tableType = None
+            table.connectionId = None
+            for column in table.tableColumns:
+                column.queryTableFieldId = None
+            demoted += 1
+    if demoted:
+        print(f"  Turned {demoted} query tables into plain ones; the query itself is not carried over.")
+
+
 def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode: str) -> None:
     """Report sheets that neither a group nor `ignore_sheets` mentions.
 
@@ -422,7 +559,9 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
         replacements.append((ws, row_idx, col_idx, mapping[val]))
 
     for ws, row_idx, col_idx, new_val in replacements:
-        ws.cell(row=row_idx, column=col_idx).value = new_val
+        cell = ws.cell(row=row_idx, column=col_idx)
+        cell.value = new_val
+        drop_hyperlink(cell)
 
     print(f"  Group '{group['name']}': {len(mapping)} unique values replaced.")
     return mapping
@@ -464,7 +603,9 @@ def apply_scale_group(wb: openpyxl.Workbook, group: dict) -> None:
         replacements.append((ws, row_idx, col_idx, scaled))
 
     for ws, row_idx, col_idx, new_val in replacements:
-        ws.cell(row=row_idx, column=col_idx).value = new_val
+        cell = ws.cell(row=row_idx, column=col_idx)
+        cell.value = new_val
+        drop_hyperlink(cell)
 
     note = f", {skipped} non-numeric cells left alone" if skipped else ""
     print(f"  Group '{group['name']}': {len(replacements)} numbers scaled by {factor}{note}.")
@@ -495,6 +636,14 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
     drop_sheets(wb, config.get("ignore_sheets", []))
     check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"))
 
+    demote_query_tables(wb)
+    clear_document_properties(wb)
+
+    if config.get("comments", "drop") == "drop":
+        strip_comments(wb)
+    else:
+        print("  WARNING: cell comments are kept. Nothing checks what is written in them.")
+
     if formulas == "values":
         clear_calculated_columns(wb)
 
@@ -508,6 +657,8 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             apply_scale_group(wb, group)
         else:
             raise ValueError(f"group {group['name']!r}: unknown strategy {strategy!r}")
+
+    report_surviving_hyperlinks(wb)
 
     wb.save(out_path)
     print(f"Anonymized file : {out_path}")

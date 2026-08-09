@@ -723,3 +723,135 @@ def test_a_key_group_leaves_dates_alone(tmp_path):
     out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))["Data"]
     assert out.cell(2, 1).value.startswith("X"), "the name is replaced"
     assert out.cell(2, 2).value == datetime.datetime(2024, 3, 1), "the date is not"
+
+
+def test_a_query_table_becomes_a_plain_table(tmp_path):
+    """Excel offers to repair a table whose query is not in the file.
+
+    openpyxl carries neither the query nor the connection over, so the
+    declaration has to go with them.
+    """
+    from openpyxl.worksheet.table import Table, TableColumn
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["rate", "ccy"])
+    ws.append([1.0, "EUR"])
+    table = Table(
+        displayName="Series3",
+        ref="A1:B2",
+        tableType="queryTable",
+        tableColumns=[
+            TableColumn(id=1, name="rate", queryTableFieldId=1),
+            TableColumn(id=2, name="ccy", queryTableFieldId=2),
+        ],
+    )
+    ws.add_table(table)
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))["Data"]
+    written = out.tables["Series3"]
+    assert written.tableType is None
+    assert [column.queryTableFieldId for column in written.tableColumns] == [None, None]
+
+
+def test_replacing_a_value_removes_the_link_under_it(tmp_path):
+    """A hyperlink is a relationship of the sheet, not a value in the cell.
+
+    A column of email addresses replaced by keys kept the addresses,
+    where no comparison of cell values would ever have looked.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["contact"])
+    ws.cell(2, 1, "a.miller@example.com").hyperlink = "mailto:a.miller@example.com"
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {"name": "people", "prefix": "PERSON", "columns": [{"sheet": "Data", "col": "A", "data_from_row": 2}]}
+            ]
+        },
+    )
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    out = openpyxl.load_workbook(out_path)["Data"]
+    assert out.cell(2, 1).value.startswith("PERSON")
+    assert out.cell(2, 1).hyperlink is None
+    with zipfile.ZipFile(out_path) as archive:
+        stored = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"a.miller@example.com" not in stored, "not anywhere in the file, not only in the cell"
+
+
+def test_cell_comments_are_removed(tmp_path):
+    """Comments are prose, and prose cannot be checked for names."""
+    from openpyxl.comments import Comment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["amount"])
+    ws.cell(2, 1, 1000).comment = Comment("Follow up with Miller & Co.", "Anna")
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    assert openpyxl.load_workbook(out_path)["Data"].cell(2, 1).comment is None
+    with zipfile.ZipFile(out_path) as archive:
+        stored = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"Miller" not in stored and b"Anna" not in stored
+
+
+def test_comments_can_be_kept_on_purpose(tmp_path):
+    from openpyxl.comments import Comment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["amount"])
+    ws.cell(2, 1, 1000).comment = Comment("a note", "Anna")
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"comments": "keep", "keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))["Data"]
+    assert out.cell(2, 1).comment is not None
+
+
+def test_the_document_properties_are_cleared(tmp_path):
+    """A workbook names the people who saved it, outside every cell."""
+    from openpyxl.packaging.custom import StringProperty
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.append(["amount"])
+    wb.properties.creator = "Angela Example"
+    wb.properties.lastModifiedBy = "Thorsten Example"
+    wb.properties.title = "TF6.xlsx"
+    wb.custom_doc_props.append(StringProperty(name="Label_Owner", value="p.benedikt@example.com"))
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    with zipfile.ZipFile(out_path) as archive:
+        stored = b"".join(archive.read(name) for name in archive.namelist())
+    for gone in (b"Angela Example", b"Thorsten Example", b"p.benedikt@example.com", b"TF6.xlsx"):
+        assert gone not in stored, gone
