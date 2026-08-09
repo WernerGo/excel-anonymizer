@@ -348,3 +348,93 @@ def test_include_numbers_says_so_explicitly(excel_with_formulas, tmp_path):
 
     ws = openpyxl.load_workbook(excel_with_formulas.with_stem(excel_with_formulas.stem + "_anonymized"))["Sheet1"]
     assert ws.cell(2, 2).value.startswith("TAXNO")
+
+
+# ---------------------------------------------------------------------------
+# what a removed sheet and a resolved formula leave behind
+# ---------------------------------------------------------------------------
+
+def test_a_defined_name_pointing_at_a_removed_sheet_goes_with_it(tmp_path):
+    """Otherwise Excel asks about links on every open and cannot resolve them."""
+    from openpyxl.workbook.defined_name import DefinedName
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.cell(1, 1, "a")
+    wb.create_sheet("Overview").cell(1, 1, "b")
+    wb.defined_names["from_overview"] = DefinedName("from_overview", attr_text="Overview!$A$1")
+    wb.defined_names["from_data"] = DefinedName("from_data", attr_text="Data!$A$1")
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"ignore_sheets": ["Overview"], "groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
+    assert "from_overview" not in out.defined_names
+    assert "from_data" in out.defined_names, "a name for a kept sheet must survive"
+
+
+def test_a_quoted_sheet_name_is_recognised_too(tmp_path):
+    """A sheet name with a space is quoted in a reference."""
+    from openpyxl.workbook.defined_name import DefinedName
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.cell(1, 1, "a")
+    wb.create_sheet("Auflistung PE").cell(1, 1, "b")
+    wb.defined_names["listing"] = DefinedName("listing", attr_text="'Auflistung PE'!$A$1")
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"ignore_sheets": ["Auflistung PE"], "groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
+    assert "listing" not in out.defined_names
+
+
+def table_workbook(tmp_path: Path) -> Path:
+    """A workbook with a table whose column carries a formula."""
+    from openpyxl.worksheet.table import Table, TableColumn, TableFormula
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["amount", "double"])
+    ws.append([1000, 2000])
+    ws.append([2000, 4000])
+    table = Table(
+        displayName="Amounts",
+        ref="A1:B3",
+        tableColumns=[
+            TableColumn(id=1, name="amount"),
+            TableColumn(id=2, name="double", calculatedColumnFormula=TableFormula(attr_text="Amounts[[#This Row],[amount]]*2")),
+        ],
+    )
+    ws.add_table(table)
+    path = tmp_path / "table.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_resolved_column_leaves_no_column_formula_behind(tmp_path):
+    """Excel flags every cell of the column as an inconsistent calculation."""
+    path = table_workbook(tmp_path)
+    config = write_config(tmp_path, {"groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
+    formulas = [c.calculatedColumnFormula for t in out["Data"].tables.values() for c in t.tableColumns]
+    assert formulas == [None, None]
+
+
+def test_keeping_the_formulas_keeps_the_column_formula(tmp_path):
+    """There the table and the cells still agree."""
+    path = table_workbook(tmp_path)
+    config = write_config(tmp_path, {"formulas": "keep", "groups": []})
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
+    formulas = [c.calculatedColumnFormula for t in out["Data"].tables.values() for c in t.tableColumns]
+    assert any(formula is not None for formula in formulas)

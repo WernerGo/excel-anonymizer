@@ -126,6 +126,66 @@ def drop_sheets(wb: openpyxl.Workbook, entries: list) -> None:
     removed = [name for name in names if name not in wb.sheetnames]
     if removed:
         print(f"  Removed {len(removed)} sheets that are not part of the delivery.")
+        drop_dangling_names(wb, removed)
+
+
+def drop_dangling_names(wb: openpyxl.Workbook, removed: list[str]) -> None:
+    """Remove defined names that point at a sheet that is no longer there.
+
+    Deleting a sheet leaves the names that referred to it behind, and
+    Excel asks about links on every open because it cannot resolve them.
+    The names are part of the removed sheet's machinery, so they go with
+    it.
+
+    Args:
+        wb: The open workbook.
+        removed: The names of the sheets that were deleted.
+    """
+    targets = {f"{name}!" for name in removed} | {f"'{name}'!" for name in removed}
+
+    dangling = [
+        key
+        for key, defined in wb.defined_names.items()
+        if any(target in str(defined.value) for target in targets)
+    ]
+    for key in dangling:
+        del wb.defined_names[key]
+
+    for ws in wb.worksheets:
+        local = [
+            key
+            for key, defined in ws.defined_names.items()
+            if any(target in str(defined.value) for target in targets)
+        ]
+        for key in local:
+            del ws.defined_names[key]
+        dangling.extend(local)
+
+    if dangling:
+        print(f"  Removed {len(dangling)} defined names that pointed at them.")
+
+
+def clear_calculated_columns(wb: openpyxl.Workbook) -> None:
+    """Forget the column formulas of tables whose cells now hold values.
+
+    A table column can carry a formula that Excel expects every cell of
+    that column to repeat. Once the formulas have been resolved to their
+    results, the cells are constants and the table still asks for the
+    formula, which Excel flags on every one of them as an inconsistent
+    column. The formula is no longer true of the file, so it goes.
+
+    Args:
+        wb: The open workbook.
+    """
+    cleared = 0
+    for ws in wb.worksheets:
+        for table in ws.tables.values():
+            for column in table.tableColumns:
+                if column.calculatedColumnFormula is not None:
+                    column.calculatedColumnFormula = None
+                    cleared += 1
+    if cleared:
+        print(f"  Cleared {cleared} table column formulas that no longer describe the cells.")
 
 
 def scale_value(value: object, factor: float) -> object | None:
@@ -284,6 +344,9 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             print("           Open the source in Excel, let it recalculate, save, and run again.")
 
     drop_sheets(wb, config.get("ignore_sheets", []))
+
+    if formulas == "values":
+        clear_calculated_columns(wb)
 
     full_mapping: dict[str, dict[str, str]] = {}
 

@@ -137,6 +137,16 @@ that these sheets are dispensable. Removing every sheet is refused, and
 a sheet that is not in the file only warns — one list often serves
 several files of the same family.
 
+Defined names that pointed at a removed sheet go with it. Left behind,
+they make Excel ask about links on every open and then fail to resolve
+them.
+
+Resolving formulas to values has a matching loose end: a table column
+can carry a formula that Excel expects every cell of the column to
+repeat. Once the cells hold constants, Excel marks each of them as an
+inconsistent calculation. In `values` mode those column formulas are
+cleared, because they no longer describe the file.
+
 ### Numbers: scaling instead of replacing
 
 Amounts are confidential too, but replacing them with keys destroys
