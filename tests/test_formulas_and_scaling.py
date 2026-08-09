@@ -5,6 +5,8 @@ and one of the two is always lost. ``strategy: scale`` makes amounts
 fictitious without destroying the relations between them.
 """
 
+import zipfile
+
 import openpyxl
 import pytest
 import yaml
@@ -68,9 +70,41 @@ def test_an_unknown_mode_is_refused(excel_with_formulas):
         load_source(excel_with_formulas, "cached")
 
 
-def test_formula_cells_without_a_result_are_counted(excel_with_formulas):
-    """Silent emptying is the failure mode; a number in the log is the guard."""
-    assert count_uncached_formulas(excel_with_formulas) == 2
+def rewrite_sheets(source: Path, target: Path, change) -> Path:
+    """Copy a workbook, passing every worksheet part through `change`."""
+    with zipfile.ZipFile(source) as reader, zipfile.ZipFile(target, "w") as writer:
+        for item in reader.infolist():
+            data = reader.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet"):
+                data = change(data)
+            writer.writestr(item, data)
+    return target
+
+
+def test_a_formula_that_was_never_calculated_is_counted(excel_with_formulas, tmp_path):
+    """A workbook Excel has never calculated stores the formula and no result.
+
+    That is the case worth warning about: in `values` mode those cells
+    arrive empty and nothing says they ever held anything.
+    """
+    never = rewrite_sheets(
+        excel_with_formulas, tmp_path / "never.xlsx", lambda data: data.replace(b"<v />", b"")
+    )
+
+    assert count_uncached_formulas(never) == 2
+
+
+def test_a_formula_whose_result_is_empty_is_not_counted(excel_with_formulas):
+    """`=IFERROR(…, "")` is calculated and its answer is nothing.
+
+    Excel records that as an empty value element and openpyxl reports it
+    as None — the same as never calculated. Counting the two together
+    made a well-formed workbook look broken: one real file reported 1061
+    such cells, every one of them correct. openpyxl writes its own
+    formula cells the same way, which is why this fixture stands for the
+    case.
+    """
+    assert count_uncached_formulas(excel_with_formulas) == 0
 
 
 def test_a_file_without_formulas_counts_none(tmp_path):

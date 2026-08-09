@@ -16,7 +16,9 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
+import zipfile
 from collections import OrderedDict
 from pathlib import Path
 
@@ -58,32 +60,36 @@ def load_source(excel_path: Path, mode: str) -> openpyxl.Workbook:
     return openpyxl.load_workbook(excel_path, data_only=(mode == "values"))
 
 
-def count_uncached_formulas(excel_path: Path) -> int:
-    """Count formula cells that carry no calculated result.
+CELL = re.compile(rb"<c\b[^>]*>(?:(?!</c>).)*</c>", re.S)
 
-    In ``values`` mode those cells arrive empty, and nothing in the
-    output says they ever held anything — the loss is silent unless it is
-    counted. A workbook that has never been opened by Excel consists
-    entirely of such cells.
+
+def count_uncached_formulas(excel_path: Path) -> int:
+    """Count formula cells that were never calculated.
+
+    Not the same as a formula whose result is empty. ``=IFERROR(…, "")``
+    is calculated and its answer is nothing, which the file records as an
+    empty value element — the cell is correct and the output should be
+    empty there too. A cell that was never calculated has no value
+    element at all, and in ``values`` mode it arrives empty without
+    anything saying it ever held something.
+
+    openpyxl reports both as None, so this reads the stored XML, where
+    the two are plainly different.
 
     Args:
         excel_path: Path to the input Excel file (.xlsx).
 
     Returns:
-        The number of formula cells whose result is missing.
+        The number of formula cells that carry no result of any kind.
     """
-    formulas = openpyxl.load_workbook(excel_path, data_only=False)
-    values = openpyxl.load_workbook(excel_path, data_only=True)
     missing = 0
-    for name in formulas.sheetnames:
-        source, calculated = formulas[name], values[name]
-        for row in source.iter_rows():
-            for cell in row:
-                if isinstance(cell.value, str) and cell.value.startswith("="):
-                    if calculated.cell(row=cell.row, column=cell.column).value is None:
-                        missing += 1
-    formulas.close()
-    values.close()
+    with zipfile.ZipFile(excel_path) as archive:
+        sheets = [name for name in archive.namelist() if name.startswith("xl/worksheets/sheet")]
+        for sheet in sheets:
+            for match in CELL.finditer(archive.read(sheet)):
+                cell = match.group(0)
+                if b"<f" in cell and b"<v" not in cell and b"<is" not in cell:
+                    missing += 1
     return missing
 
 

@@ -101,13 +101,20 @@ formulas: values   # default
 to pass its data on, and a program reading the output wants values. It
 also makes the output reproducible: nothing recalculates.
 
-Cells whose formula has never been calculated arrive **empty** in
-`values` mode. That is a silent loss, so the run counts them and warns:
+A workbook Excel has never calculated stores its formulas without any
+result, and those cells arrive **empty** in `values` mode with nothing
+saying they ever held something. The run counts them and warns:
 
 ```
 WARNING: 930 formula cells carry no calculated result and arrive empty.
          Open the source in Excel, let it recalculate, save, and run again.
 ```
+
+This counts only cells with no result at all. A formula whose result
+*is* empty — `=IFERROR(…, "")` is the common one — is calculated, and
+the file records that as an empty value element. openpyxl reports both
+as None, so the check reads the stored XML, where they differ. Treating
+them alike made a healthy workbook report a thousand broken cells.
 
 ### Sheets that should not travel at all
 
