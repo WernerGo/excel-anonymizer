@@ -151,6 +151,20 @@ keep_sheets:
     reason: a list of currency codes, no client data in it
 ```
 
+Sheets are named three ways, in `ignore_sheets`, `keep_sheets` and a
+group's columns alike:
+
+```yaml
+  - sheet: Overview                 # exactly
+  - sheet_pattern: '\d+'            # every sheet whose name matches
+  - empty: true                     # every sheet with no value in it
+```
+
+The pattern is what makes a workbook of repeated tabs manageable — one
+real file has 55 cashflow tabs of identical shape, another over a
+hundred. `empty: true` is for section dividers, which often carry
+nothing but a name that is itself worth removing.
+
 A sheet counts as accounted for by being named in a group, by being
 removed through `ignore_sheets`, or by standing in `keep_sheets`. Use
 `fail` wherever the output is supposed to be free of original values:

@@ -93,6 +93,51 @@ def count_uncached_formulas(excel_path: Path) -> int:
     return missing
 
 
+def sheet_is_empty(ws) -> bool:
+    """Whether a worksheet holds no value in any cell.
+
+    The DataSet workbooks use empty sheets as section dividers, and some
+    of them are named after a transaction. They carry no data, but a
+    name is a value too.
+    """
+    return not any(cell.value is not None for row in ws.iter_rows() for cell in row)
+
+
+def matching_sheets(wb: openpyxl.Workbook, spec, warn_if_absent: bool = True) -> list[str]:
+    """Return the sheets one entry refers to.
+
+    An entry names a sheet exactly (``sheet``), by a regular expression
+    over the whole name (``sheet_pattern``), or by emptiness
+    (``empty: true``). The pattern is what makes the cashflow tabs
+    manageable: TF1 has 55 of them in production and TF8 over a hundred,
+    all with the same structure and a number for a name.
+
+    Args:
+        wb: The open workbook.
+        spec: A string, or a mapping with one of the three keys.
+        warn_if_absent: Whether to report a named sheet that is not there.
+
+    Returns:
+        The matching sheet names, in workbook order.
+    """
+    if not isinstance(spec, dict):
+        spec = {"sheet": spec}
+
+    if spec.get("empty"):
+        return [name for name in wb.sheetnames if sheet_is_empty(wb[name])]
+
+    if "sheet_pattern" in spec:
+        pattern = re.compile(spec["sheet_pattern"])
+        return [name for name in wb.sheetnames if pattern.fullmatch(name)]
+
+    name = str(spec["sheet"])
+    if name in wb.sheetnames:
+        return [name]
+    if warn_if_absent:
+        print(f"  WARNING: sheet '{name}' is named in the config but not in the file.")
+    return []
+
+
 def drop_sheets(wb: openpyxl.Workbook, entries: list) -> None:
     """Remove sheets that are not part of what is being passed on.
 
@@ -111,19 +156,17 @@ def drop_sheets(wb: openpyxl.Workbook, entries: list) -> None:
         wb: The open workbook.
         entries: Sheet names, or mappings with ``sheet`` and ``reason``.
     """
-    names = [entry["sheet"] if isinstance(entry, dict) else entry for entry in entries]
-    names = [str(name) for name in names]
+    names: list[str] = []
+    for entry in entries:
+        names.extend(name for name in matching_sheets(wb, entry) if name not in names)
 
     if names and not set(wb.sheetnames) - set(names):
         raise ValueError("ignore_sheets would remove every sheet")
 
     for name in names:
-        if name not in wb.sheetnames:
-            print(f"  WARNING: sheet '{name}' listed for removal but not in the file.")
-            continue
         del wb[name]
 
-    removed = [name for name in names if name not in wb.sheetnames]
+    removed = list(names)
     if removed:
         print(f"  Removed {len(removed)} sheets that are not part of the delivery.")
         drop_dangling_names(wb, removed)
@@ -216,15 +259,13 @@ def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode
     if mode not in ("warn", "fail"):
         raise ValueError(f"unlisted_sheets: {mode!r} — expected 'warn' or 'fail'")
 
-    named = {
-        str(col["sheet"])
-        for group in config.get("groups", [])
-        for col in group.get("columns", [])
-    }
-    named |= {
-        str(entry["sheet"]) if isinstance(entry, dict) else str(entry)
-        for entry in config.get("keep_sheets", [])
-    }
+    named: set[str] = set()
+    for group in config.get("groups", []):
+        for col in group.get("columns", []):
+            named.update(matching_sheets(wb, col, warn_if_absent=False))
+    for entry in config.get("keep_sheets", []):
+        named.update(matching_sheets(wb, entry, warn_if_absent=False))
+
     unlisted = [name for name in wb.sheetnames if name not in named]
     if not unlisted:
         return
@@ -273,18 +314,14 @@ def iter_cells(wb: openpyxl.Workbook, columns: list[dict]) -> list[tuple]:
     """
     cells: list[tuple] = []
     for col_spec in columns:
-        sheet_name = str(col_spec["sheet"])
         col_letter = col_spec["col"]
         data_from = col_spec.get("data_from_row", 2)
-
-        if sheet_name not in wb.sheetnames:
-            print(f"  WARNING: sheet '{sheet_name}' not found, skipped.")
-            continue
-
-        ws = wb[sheet_name]
         col_idx = openpyxl.utils.column_index_from_string(col_letter)
-        for row_idx in range(data_from, ws.max_row + 1):
-            cells.append((ws, row_idx, col_idx))
+
+        for sheet_name in matching_sheets(wb, col_spec):
+            ws = wb[sheet_name]
+            for row_idx in range(data_from, ws.max_row + 1):
+                cells.append((ws, row_idx, col_idx))
     return cells
 
 

@@ -482,3 +482,88 @@ def test_an_ignored_sheet_counts_as_accounted_for(excel_with_a_working_sheet, tm
 
     out = excel_with_a_working_sheet.with_stem(excel_with_a_working_sheet.stem + "_anonymized")
     assert openpyxl.load_workbook(out).sheetnames == ["Data"]
+
+
+# ---------------------------------------------------------------------------
+# naming many sheets at once
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def excel_with_many_tabs(tmp_path: Path) -> Path:
+    """Three numbered tabs of one shape, a data sheet, and an empty divider."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.cell(1, 1, "name")
+    wb.active.cell(2, 1, "Smith")
+    for number in ("48", "49", "77"):
+        tab = wb.create_sheet(number)
+        tab.cell(1, 1, "comment")
+        tab.cell(2, 1, f"note {number}")
+    wb.create_sheet("AC-DC")
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_pattern_reaches_every_matching_sheet(excel_with_many_tabs, tmp_path):
+    """TF1 has 55 cashflow tabs in production and TF8 over a hundred."""
+    config = write_config(
+        tmp_path,
+        {
+            "keep_sheets": ["Data", "AC-DC"],
+            "groups": [
+                {
+                    "name": "comments",
+                    "prefix": "TEXT",
+                    "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    anonymize(excel_with_many_tabs, config)
+
+    out = openpyxl.load_workbook(excel_with_many_tabs.with_stem(excel_with_many_tabs.stem + "_anonymized"))
+    assert [out[tab].cell(2, 1).value.startswith("TEXT") for tab in ("48", "49", "77")] == [True] * 3
+    assert out["Data"].cell(2, 1).value == "Smith", "the pattern must not reach beyond it"
+
+
+def test_a_pattern_accounts_for_the_sheets_it_matches(excel_with_many_tabs, tmp_path):
+    """Otherwise every tab would have to be listed twice."""
+    config = write_config(
+        tmp_path,
+        {
+            "unlisted_sheets": "fail",
+            "keep_sheets": ["Data", "AC-DC"],
+            "groups": [
+                {
+                    "name": "comments",
+                    "prefix": "TEXT",
+                    "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    anonymize(excel_with_many_tabs, config)
+
+
+def test_empty_sheets_can_be_removed_as_a_class(excel_with_many_tabs, tmp_path):
+    """The dividers are empty and some of them are named after a transaction."""
+    config = write_config(
+        tmp_path,
+        {
+            "ignore_sheets": [{"empty": True, "reason": "section dividers"}],
+            "keep_sheets": ["Data"],
+            "groups": [
+                {
+                    "name": "comments",
+                    "prefix": "TEXT",
+                    "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    anonymize(excel_with_many_tabs, config)
+
+    out = openpyxl.load_workbook(excel_with_many_tabs.with_stem(excel_with_many_tabs.stem + "_anonymized"))
+    assert "AC-DC" not in out.sheetnames
+    assert set(out.sheetnames) == {"Data", "48", "49", "77"}
