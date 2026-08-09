@@ -567,3 +567,47 @@ def test_empty_sheets_can_be_removed_as_a_class(excel_with_many_tabs, tmp_path):
     out = openpyxl.load_workbook(excel_with_many_tabs.with_stem(excel_with_many_tabs.stem + "_anonymized"))
     assert "AC-DC" not in out.sheetnames
     assert set(out.sheetnames) == {"Data", "48", "49", "77"}
+
+
+def test_a_pattern_that_matches_nothing_stops_the_run(excel_with_many_tabs, tmp_path):
+    """The one mistake no other check catches.
+
+    `'\\d+'` in single-quoted YAML is a literal backslash followed by a
+    `d`, so it matches no sheet at all. The columns it named went
+    unreplaced, and the configuration, the structural comparison and the
+    residual check all reported the file as sound.
+    """
+    config = write_config(
+        tmp_path,
+        {
+            "keep_sheets": ["Data", "AC-DC"],
+            "groups": [
+                {
+                    "name": "comments",
+                    "prefix": "TEXT",
+                    "columns": [{"sheet_pattern": r"\\d+", "col": "A", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="matches no sheet"):
+        anonymize(excel_with_many_tabs, config)
+
+
+def test_a_named_sheet_that_is_absent_from_a_group_stops_the_run(excel_with_many_tabs, tmp_path):
+    """A sheet renamed between exports leaves its column unhandled."""
+    config = write_config(
+        tmp_path,
+        {
+            "keep_sheets": ["Data", "AC-DC"],
+            "groups": [
+                {
+                    "name": "names",
+                    "prefix": "NAME",
+                    "columns": [{"sheet": "Daten", "col": "A", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="matches no sheet"):
+        anonymize(excel_with_many_tabs, config)

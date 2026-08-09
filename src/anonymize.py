@@ -302,15 +302,27 @@ def scale_value(value: object, factor: float) -> object | None:
     return int(round(scaled)) if isinstance(value, int) else round(scaled, 6)
 
 
-def iter_cells(wb: openpyxl.Workbook, columns: list[dict]) -> list[tuple]:
+def iter_cells(wb: openpyxl.Workbook, columns: list[dict], group_name: str = "") -> list[tuple]:
     """Yield every cell of the configured columns as (worksheet, row, column).
+
+    A column entry that matches no sheet stops the run. It is the one
+    mistake this tool cannot survive quietly: the values it was meant to
+    replace stay in the file, and every other check still passes. The
+    configuration says the column is handled, the structural comparison
+    finds no difference because nothing moved, and the residual check
+    only looks at text — so a mistyped pattern over a sheet full of
+    amounts goes through unseen. It did, once.
 
     Args:
         wb: The open workbook.
         columns: The ``columns`` entries of one group.
+        group_name: The group these columns belong to, for the error.
 
     Returns:
         A list of (worksheet, row index, column index) tuples.
+
+    Raises:
+        ValueError: If a column entry matches no sheet in the workbook.
     """
     cells: list[tuple] = []
     for col_spec in columns:
@@ -318,7 +330,15 @@ def iter_cells(wb: openpyxl.Workbook, columns: list[dict]) -> list[tuple]:
         data_from = col_spec.get("data_from_row", 2)
         col_idx = openpyxl.utils.column_index_from_string(col_letter)
 
-        for sheet_name in matching_sheets(wb, col_spec):
+        sheets = matching_sheets(wb, col_spec, warn_if_absent=False)
+        if not sheets:
+            where = col_spec.get("sheet") or col_spec.get("sheet_pattern") or "empty: true"
+            raise ValueError(
+                f"group '{group_name}': column {col_letter} refers to {where!r}, "
+                f"which matches no sheet in the file. Nothing would be replaced there."
+            )
+
+        for sheet_name in sheets:
             ws = wb[sheet_name]
             for row_idx in range(data_from, ws.max_row + 1):
                 cells.append((ws, row_idx, col_idx))
@@ -343,7 +363,7 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
     mapping: dict[str, str] = OrderedDict()
     replacements: list[tuple] = []
 
-    for ws, row_idx, col_idx in iter_cells(wb, group["columns"]):
+    for ws, row_idx, col_idx in iter_cells(wb, group["columns"], group["name"]):
         cell = ws.cell(row=row_idx, column=col_idx)
         if isinstance(cell.value, (int, float)) and not numbers_too:
             # A key is text. Writing one over a number changes the type of
@@ -391,7 +411,7 @@ def apply_scale_group(wb: openpyxl.Workbook, group: dict) -> None:
     replacements: list[tuple] = []
     skipped = 0
 
-    for ws, row_idx, col_idx in iter_cells(wb, group["columns"]):
+    for ws, row_idx, col_idx in iter_cells(wb, group["columns"], group["name"]):
         value = ws.cell(row=row_idx, column=col_idx).value
         if value is None or value == "":
             continue
