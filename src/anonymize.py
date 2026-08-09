@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import json
 import re
 import sys
@@ -326,23 +327,56 @@ def iter_cells(wb: openpyxl.Workbook, columns: list[dict], group_name: str = "")
     """
     cells: list[tuple] = []
     for col_spec in columns:
-        col_letter = col_spec["col"]
         data_from = col_spec.get("data_from_row", 2)
-        col_idx = openpyxl.utils.column_index_from_string(col_letter)
+        described = col_spec.get("col") or f"{col_spec.get('col_from')} onwards"
 
         sheets = matching_sheets(wb, col_spec, warn_if_absent=False)
         if not sheets:
             where = col_spec.get("sheet") or col_spec.get("sheet_pattern") or "empty: true"
             raise ValueError(
-                f"group '{group_name}': column {col_letter} refers to {where!r}, "
+                f"group '{group_name}': column {described} refers to {where!r}, "
                 f"which matches no sheet in the file. Nothing would be replaced there."
             )
 
         for sheet_name in sheets:
             ws = wb[sheet_name]
-            for row_idx in range(data_from, ws.max_row + 1):
-                cells.append((ws, row_idx, col_idx))
+            for col_idx in column_range(col_spec, ws):
+                for row_idx in range(data_from, ws.max_row + 1):
+                    cells.append((ws, row_idx, col_idx))
     return cells
+
+
+def column_range(col_spec: dict, ws) -> range:
+    """Return the column indices one entry covers in one sheet.
+
+    An entry names a single column (``col``) or everything from one
+    column rightwards (``col_from``, optionally bounded by ``col_to``).
+
+    The range is what makes the working area of a sheet addressable. The
+    cashflow tabs of the DataSet workbooks hold their data in A to AB and
+    everything to the right of that is scratch: running sums, repeated
+    drawdowns, a second copy of the cashflow. Those columns carry the
+    same amounts as the data columns, so leaving them alone leaves the
+    originals in the file — and they cannot be listed by letter, because
+    they sit at different letters in each tab. What holds across all of
+    them is where the data stops.
+
+    Args:
+        col_spec: One ``columns`` entry.
+        ws: The worksheet the range is resolved against.
+
+    Returns:
+        The column indices, one-based.
+    """
+    if "col" in col_spec:
+        index = openpyxl.utils.column_index_from_string(col_spec["col"])
+        return range(index, index + 1)
+
+    first = openpyxl.utils.column_index_from_string(col_spec["col_from"])
+    last = ws.max_column
+    if "col_to" in col_spec:
+        last = min(last, openpyxl.utils.column_index_from_string(col_spec["col_to"]))
+    return range(first, last + 1)
 
 
 def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
@@ -360,6 +394,7 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
 
     prefix = group["prefix"]
     numbers_too = group.get("include_numbers", False)
+    dates_too = group.get("include_dates", False)
     mapping: dict[str, str] = OrderedDict()
     replacements: list[tuple] = []
 
@@ -371,6 +406,13 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
             # to its content — and columns holding text among numbers are
             # common enough that keying them silently would be a trap. A
             # group that does mean to replace numbers says `include_numbers`.
+            continue
+        if isinstance(cell.value, (datetime.datetime, datetime.date, datetime.time)) and not dates_too:
+            # The same argument, and one more: a group that covers a range
+            # of columns will meet dates whether it meant to or not. Where
+            # a date does have to go, `include_dates` says so — but it
+            # leaves a date column full of text behind, so shifting the
+            # dates is usually the better answer.
             continue
         val = str(cell.value).strip() if cell.value is not None else ""
         if not val or val in ("None", "nan"):

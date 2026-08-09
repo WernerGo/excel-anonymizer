@@ -5,6 +5,7 @@ and one of the two is always lost. ``strategy: scale`` makes amounts
 fictitious without destroying the relations between them.
 """
 
+import datetime
 import zipfile
 
 import openpyxl
@@ -611,3 +612,114 @@ def test_a_named_sheet_that_is_absent_from_a_group_stops_the_run(excel_with_many
     )
     with pytest.raises(ValueError, match="matches no sheet"):
         anonymize(excel_with_many_tabs, config)
+
+
+# ---------------------------------------------------------------------------
+# addressing a range of columns
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def excel_with_a_scratch_area(tmp_path: Path) -> Path:
+    """Data in A and B, and helper columns to the right of it.
+
+    The helper columns sit at different letters in each tab, which is
+    why they cannot be listed by letter — the cashflow tabs of the
+    DataSet workbooks are exactly this shape.
+    """
+    wb = openpyxl.Workbook()
+    first = wb.active
+    first.title = "1"
+    first.append(["id", "amount", "sum", "note"])
+    first.append([1, 1000, 1000, "Miller"])
+    second = wb.create_sheet("2")
+    second.append(["id", "amount", "spacer", "sum", "note"])
+    second.append([2, 2000, None, 2000, "Miller"])
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_range_reaches_the_helper_columns_wherever_they_sit(excel_with_a_scratch_area, tmp_path):
+    """The originals hide in the columns beyond the data."""
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "amounts",
+                    "strategy": "scale",
+                    "factor": 2,
+                    "columns": [{"sheet_pattern": r"\d+", "col_from": "B", "data_from_row": 2}],
+                },
+                {
+                    "name": "text",
+                    "prefix": "TEXT",
+                    "columns": [{"sheet_pattern": r"\d+", "col_from": "B", "data_from_row": 2}],
+                },
+            ]
+        },
+    )
+    anonymize(excel_with_a_scratch_area, config)
+
+    out = openpyxl.load_workbook(excel_with_a_scratch_area.with_stem(excel_with_a_scratch_area.stem + "_anonymized"))
+    assert [out["1"].cell(2, c).value for c in (2, 3)] == [2000, 2000]
+    assert [out["2"].cell(2, c).value for c in (2, 4)] == [4000, 4000]
+    assert out["1"].cell(2, 4).value.startswith("TEXT"), "the note is in D here"
+    assert out["2"].cell(2, 5).value.startswith("TEXT"), "and in E there"
+    assert out["1"].cell(2, 1).value == 1, "nothing left of the range is touched"
+
+
+def test_a_range_can_be_bounded_on_the_right(excel_with_a_scratch_area, tmp_path):
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "amounts",
+                    "strategy": "scale",
+                    "factor": 2,
+                    "columns": [
+                        {"sheet": "1", "col_from": "B", "col_to": "C", "data_from_row": 2},
+                    ],
+                }
+            ]
+        },
+    )
+    anonymize(excel_with_a_scratch_area, config)
+
+    out = openpyxl.load_workbook(excel_with_a_scratch_area.with_stem(excel_with_a_scratch_area.stem + "_anonymized"))
+    assert [out["1"].cell(2, c).value for c in (2, 3)] == [2000, 2000]
+    assert out["1"].cell(2, 4).value == "Miller", "D is beyond col_to"
+
+
+def test_a_key_group_leaves_dates_alone(tmp_path):
+    """A key over a date turns a date column into a text column.
+
+    A range of columns meets dates whether it meant to or not — the
+    scratch area of a cashflow tab repeats the cashflow date four times.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    ws.append(["name", "when"])
+    ws.append(["Miller", datetime.date(2024, 3, 1)])
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "everything",
+                    "prefix": "X",
+                    "columns": [{"sheet": "Data", "col_from": "A", "data_from_row": 2}],
+                }
+            ]
+        },
+    )
+    anonymize(path, config)
+
+    out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))["Data"]
+    assert out.cell(2, 1).value.startswith("X"), "the name is replaced"
+    assert out.cell(2, 2).value == datetime.datetime(2024, 3, 1), "the date is not"
