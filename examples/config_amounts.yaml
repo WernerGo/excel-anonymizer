@@ -1,0 +1,54 @@
+# Example: names replaced by keys, amounts scaled by one factor
+#
+# The combination most files need. Names carry identity and have to go;
+# amounts carry identity too, but replacing them destroys what made the
+# file worth sharing — a scaled amount is fictitious and still behaves
+# like an amount.
+
+output_suffix: "_anonymized"
+save_mapping: "anonymization_map.json"
+
+# Formulas are resolved to their last calculated results, so the output
+# is a plain value workbook. Use `keep` for a file that stays in use in
+# Excel — and read the warning it prints.
+formulas: values
+
+groups:
+  # Identity: every occurrence of one name becomes the same key, in
+  # every sheet listed here.
+  - name: companies
+    prefix: "COMPANY"
+    columns:
+      - sheet: Positions
+        col: I
+        data_from_row: 2
+      - sheet: Reporting
+        col: H
+        data_from_row: 2
+
+  # Amounts: one factor for the whole workbook, so a commitment stays
+  # below its tranche total and sums keep reconciling.
+  - name: amounts
+    strategy: scale
+    factor: 1.2837
+    columns:
+      - sheet: Positions
+        col: AB          # commitment
+        data_from_row: 2
+      - sheet: Positions
+        col: AC          # tranche total
+        data_from_row: 2
+      - sheet: Cashflows
+        col: D           # amount
+        data_from_row: 2
+
+  # Deliberately NOT scaled: weights add up to 1.0 per project, and a
+  # factor would make them add up to 1.2837. Rates and quotas are the
+  # same case — they are ratios, not amounts.
+  #
+  # - name: weights
+  #   strategy: scale
+  #   factor: 1.2837
+  #   columns:
+  #     - sheet: Positions
+  #       col: E

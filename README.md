@@ -82,6 +82,66 @@ groups:
         data_from_row: 2
 ```
 
+### Formulas: what the output contains
+
+An `.xlsx` stores two things for a formula cell — the formula, and the
+result Excel last calculated for it. openpyxl loads one or the other and
+writes back whatever it loaded, so one of the two is always lost:
+
+```yaml
+formulas: values   # default
+```
+
+| Mode | Output holds | Lost |
+|------|--------------|------|
+| `values` | the calculated results, as plain values | the formulas |
+| `keep`   | the formulas | their results — the file must be recalculated in Excel before anything can read a value |
+
+`values` is the default because the usual reason to anonymize a file is
+to pass its data on, and a program reading the output wants values. It
+also makes the output reproducible: nothing recalculates.
+
+Cells whose formula has never been calculated arrive **empty** in
+`values` mode. That is a silent loss, so the run counts them and warns:
+
+```
+WARNING: 930 formula cells carry no calculated result and arrive empty.
+         Open the source in Excel, let it recalculate, save, and run again.
+```
+
+### Numbers: scaling instead of replacing
+
+Amounts are confidential too, but replacing them with keys destroys
+everything that made the file useful. A group can scale them instead:
+
+```yaml
+groups:
+  - name: amounts
+    strategy: scale
+    factor: 1.2837
+    columns:
+      - sheet: Positions
+        col: H
+        data_from_row: 2
+```
+
+One factor for a whole workbook, so the relations between amounts
+survive: a commitment stays below its tranche total, and a sum of
+cashflows still reconciles against the balance it belongs to.
+
+Two rules follow from that:
+
+- **Do not scale ratios.** Weights that add up to 1.0 would add up to
+  the factor. Rates, percentages and quotas stay in a `key` group or are
+  left out entirely. Which columns are amounts and which are ratios is a
+  statement about the data, and that is why it lives in the config.
+- **The type is preserved.** An integer stays an integer, so a column of
+  whole amounts does not turn into a column of decimals. Text, dates and
+  booleans in a scaled column are left untouched and counted in the log.
+
+Scaling is one-way — rounding loses the remainder — so scale groups are
+not written to the mapping file.
+
 ## faker_replace.py — realistic fake data
 
 Replaces values with realistic fake names, cities, companies etc. via [Faker](https://faker.readthedocs.io/). Same original value always gets the same fake replacement.
@@ -165,6 +225,7 @@ Values are drawn from a small pool with repetition — so the same name appears 
 | `examples/config_names.yaml` | Key replacement for person names |
 | `examples/config_full.yaml` | Key replacement for names, departments, locations |
 | `examples/config_faker.yaml` | Faker replacement with separate groups for last/first names |
+| `examples/config_amounts.yaml` | Key replacement for names plus scaled amounts |
 
 ## Security note
 
