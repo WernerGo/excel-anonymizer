@@ -369,7 +369,9 @@ def demote_query_tables(wb: openpyxl.Workbook) -> None:
         print(f"  Turned {demoted} query tables into plain ones; the query itself is not carried over.")
 
 
-def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode: str) -> None:
+def check_every_sheet_is_accounted_for(
+    wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
+) -> None:
     """Report sheets that neither a group nor `ignore_sheets` mentions.
 
     A configuration is written against the file you had. The next export
@@ -382,14 +384,21 @@ def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode
     it is. The third is needed as often as the other two: a sheet can be
     empty, or hold nothing but a list of currency codes.
 
-    ``warn`` names them and continues; ``fail`` refuses. Use ``fail``
+    ``warn`` counts them and continues; ``fail`` refuses. Use ``fail``
     wherever the output is supposed to be free of original values, which
     can only be claimed for a file whose every sheet was considered.
+
+    The names go into a file beside the workbook rather than onto the
+    screen. In a workbook of this kind a sheet is often named after the
+    transaction it holds, so the list of sheets nobody has decided about
+    is itself confidential — and it is the one thing whoever runs this is
+    most likely to copy somewhere in order to ask about it.
 
     Args:
         wb: The workbook, after the ignored sheets have been removed.
         config: The parsed configuration.
         mode: ``warn`` or ``fail``.
+        excel_path: The input file; the listing is written beside it.
 
     Raises:
         ValueError: In ``fail`` mode, if any sheet is unaccounted for.
@@ -408,13 +417,101 @@ def check_every_sheet_is_accounted_for(wb: openpyxl.Workbook, config: dict, mode
     if not unlisted:
         return
 
-    print(f"  {len(unlisted)} sheets are in the file but in no group and not in ignore_sheets:")
-    for name in unlisted:
-        print(f"    {name}")
+    listing = excel_path.with_name(f"{excel_path.stem}_unlisted_sheets.txt")
+    listing.write_text("\n".join(unlisted) + "\n", encoding="utf-8")
+
+    print(f"  {len(unlisted)} sheets are in the file but in no group and not in ignore_sheets.")
+    print(f"  Their names are in {listing.name}, beside the workbook.")
     if mode == "fail":
         raise ValueError(
-            f"{len(unlisted)} sheets are unaccounted for; list them in a group or in ignore_sheets"
+            f"{len(unlisted)} sheets are unaccounted for; list them in a group or in ignore_sheets. "
+            f"See {listing.name}."
         )
+
+
+def check_patterns_reach_one_shape(wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path) -> None:
+    """Check that the sheets a pattern matches all have the same header row.
+
+    A pattern plus a column letter is a bet: that every sheet the pattern
+    reaches puts the same thing in the same place. Where the bet is wrong
+    the letters land on the neighbouring column, and nothing says so —
+    the count of replaced values goes up, the structural comparison finds
+    the shape unchanged, and the values that were supposed to be replaced
+    are still there.
+
+    So the bet is checked, and only where it was made: the header of the
+    first matching sheet is taken as the shape, and every other matching
+    sheet is compared against it in exactly the columns some entry names
+    by letter. Nowhere else. A column the configuration never touches may
+    hold anything — one cashflow tab of TF1 has a leftover heading in A,
+    which says nothing about the columns that are addressed — and the
+    scratch area to the right of the data differs from tab to tab by
+    design, which is why it is addressed as a range rather than by
+    letter.
+
+    What is reported is a count and a column number. The names of the
+    sheets that differ go into a file beside the workbook, because a
+    sheet is often named after the transaction it holds.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+        mode: ``warn`` or ``fail``.
+        excel_path: The input file; the listing is written beside it.
+
+    Raises:
+        ValueError: In ``fail`` mode, if a pattern reaches two shapes.
+    """
+    reach: dict[str, set[int]] = {}
+    for group in config.get("groups", []):
+        for col in group.get("columns", []):
+            pattern = col.get("sheet_pattern")
+            if pattern is None or "col" not in col:
+                continue
+            index = openpyxl.utils.column_index_from_string(col["col"])
+            reach.setdefault(pattern, set()).add(index)
+
+    odd: list[str] = []
+    for pattern, indices in reach.items():
+        names = matching_sheets(wb, {"sheet_pattern": pattern}, warn_if_absent=False)
+        if len(names) < 2:
+            continue
+        columns = sorted(indices)
+        shape = _header(wb[names[0]], columns)
+        differing = [name for name in names[1:] if _header(wb[name], columns) != shape]
+        if differing:
+            elsewhere = _header(wb[differing[0]], columns)
+            moved = ", ".join(
+                openpyxl.utils.get_column_letter(index)
+                for index, (here, there) in zip(columns, zip(shape, elsewhere))
+                if here != there
+            )
+            print(
+                f"  {len(differing)} of {len(names)} sheets matched by a pattern "
+                f"do not have the header the letters assume, in column {moved}."
+            )
+            odd.extend(differing)
+
+    if not odd:
+        return
+
+    listing = excel_path.with_name(f"{excel_path.stem}_differing_sheets.txt")
+    listing.write_text("\n".join(odd) + "\n", encoding="utf-8")
+    print(f"  Their names are in {listing.name}, beside the workbook.")
+    if mode == "fail":
+        raise ValueError(
+            f"{len(odd)} sheets do not have the layout their pattern assumes; "
+            f"address them separately. See {listing.name}."
+        )
+
+
+def _header(ws, columns: list[int]) -> tuple:
+    """Return the header cells at the given one-based columns, lowercased."""
+    row = next(ws.iter_rows(min_row=1, max_row=1, max_col=max(columns), values_only=True), ())
+    return tuple(
+        str(row[index - 1]).strip().lower() if index <= len(row) and row[index - 1] is not None else ""
+        for index in columns
+    )
 
 
 def scale_value(value: object, factor: float) -> object | None:
@@ -634,7 +731,8 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             print("           Open the source in Excel, let it recalculate, save, and run again.")
 
     drop_sheets(wb, config.get("ignore_sheets", []))
-    check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"))
+    check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
+    check_patterns_reach_one_shape(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
 
     demote_query_tables(wb)
     clear_document_properties(wb)

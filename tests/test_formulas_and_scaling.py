@@ -446,14 +446,26 @@ def test_keeping_the_formulas_keeps_the_column_formula(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_a_sheet_in_no_list_is_reported(excel_with_a_working_sheet, tmp_path, capsys):
-    """The next export carries a sheet the config was never written against."""
+    """The next export carries a sheet the config was never written against.
+
+    The count goes to the screen and the names go to a file beside the
+    workbook. A sheet is often named after the transaction it holds, so
+    the list of the ones nobody has decided about is itself confidential
+    — and it is exactly what someone reaches for when they want to ask
+    about it.
+    """
     config = write_config(
         tmp_path,
         {"groups": [{"name": "n", "prefix": "N", "columns": [{"sheet": "Data", "col": "A"}]}]},
     )
     anonymize(excel_with_a_working_sheet, config)
 
-    assert "Overview" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "1 sheets are in the file but in no group" in printed
+    assert "Overview" not in printed
+
+    listing = excel_with_a_working_sheet.with_name(f"{excel_with_a_working_sheet.stem}_unlisted_sheets.txt")
+    assert listing.read_text(encoding="utf-8").split() == ["Overview"]
 
 
 def test_fail_refuses_to_write_a_file_with_an_unlisted_sheet(excel_with_a_working_sheet, tmp_path):
@@ -855,3 +867,89 @@ def test_the_document_properties_are_cleared(tmp_path):
         stored = b"".join(archive.read(name) for name in archive.namelist())
     for gone in (b"Angela Example", b"Thorsten Example", b"p.benedikt@example.com", b"TF6.xlsx"):
         assert gone not in stored, gone
+
+
+# ---------------------------------------------------------------------------
+# a pattern is a bet about the layout
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def excel_with_a_tab_out_of_line(tmp_path: Path) -> Path:
+    """Three numbered tabs, one of which has a column inserted."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "1"
+    wb.active.append(["investment_id", "amount", "comment"])
+    wb.active.append([1, 1000, "note"])
+    second = wb.create_sheet("2")
+    second.append(["investment_id", "amount", "comment"])
+    second.append([2, 2000, "note"])
+    third = wb.create_sheet("3")
+    third.append(["investment_id", "PIK comment", "amount"])
+    third.append([3, "note", 3000])
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_pattern_that_reaches_two_layouts_is_reported(excel_with_a_tab_out_of_line, tmp_path, capsys):
+    """Otherwise the letters land on the neighbouring column in silence."""
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "amounts",
+                    "strategy": "scale",
+                    "factor": 2,
+                    "columns": [{"sheet_pattern": r"\d+", "col": "B", "data_from_row": 2}],
+                }
+            ]
+        },
+    )
+    anonymize(excel_with_a_tab_out_of_line, config)
+
+    printed = capsys.readouterr().out
+    assert "1 of 3 sheets matched by a pattern do not have the header the letters assume" in printed
+    assert "in column B" in printed
+    listing = excel_with_a_tab_out_of_line.with_name(
+        f"{excel_with_a_tab_out_of_line.stem}_differing_sheets.txt"
+    )
+    assert listing.read_text(encoding="utf-8").split() == ["3"]
+
+
+def test_fail_refuses_a_pattern_that_reaches_two_layouts(excel_with_a_tab_out_of_line, tmp_path):
+    config = write_config(
+        tmp_path,
+        {
+            "unlisted_sheets": "fail",
+            "groups": [
+                {
+                    "name": "amounts",
+                    "strategy": "scale",
+                    "factor": 2,
+                    "columns": [{"sheet_pattern": r"\d+", "col": "B", "data_from_row": 2}],
+                }
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="do not have the layout their pattern assumes"):
+        anonymize(excel_with_a_tab_out_of_line, config)
+
+
+def test_the_scratch_area_beyond_the_named_columns_may_differ(excel_with_a_tab_out_of_line, tmp_path, capsys):
+    """A range is addressed precisely because those columns vary."""
+    config = write_config(
+        tmp_path,
+        {
+            "groups": [
+                {
+                    "name": "ids",
+                    "prefix": "ID",
+                    "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}],
+                }
+            ]
+        },
+    )
+    anonymize(excel_with_a_tab_out_of_line, config)
+
+    assert "differ in their header row" not in capsys.readouterr().out
