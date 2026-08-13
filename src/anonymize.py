@@ -369,6 +369,80 @@ def demote_query_tables(wb: openpyxl.Workbook) -> None:
         print(f"  Turned {demoted} query tables into plain ones; the query itself is not carried over.")
 
 
+def drop_external_links(wb: openpyxl.Workbook) -> None:
+    """Remove the links to other workbooks, and what they last read.
+
+    A formula that reaches into another workbook does not only record
+    where that workbook is — it caches the values it last read from it,
+    so the figure still shows when the other file is not there. Both
+    survive anonymisation untouched: the cells being replaced are in this
+    workbook, and the cache is not a cell.
+
+    So the copy carries a directory path, often with a person's name in
+    it, and a block of someone else's data that nothing here has ever
+    looked at. The PE tracker has thirty of them, one caching 792 values.
+
+    Nothing is lost by removing them. The formulas are resolved to their
+    results before this runs, and a derived dataset is not going to
+    refresh anything.
+
+    Args:
+        wb: The open workbook.
+    """
+    count = len(wb._external_links)
+    if count:
+        wb._external_links = []
+        print(f"  Removed {count} links to other workbooks, with the values they had cached.")
+
+
+def drop_pivot_caches(wb: openpyxl.Workbook) -> None:
+    """Remove pivot tables and the copy of the data they keep.
+
+    A pivot table does not read the sheet when it draws; it reads a cache
+    of the source range stored beside it. Anonymising the sheet leaves
+    that cache holding the original rows.
+
+    Args:
+        wb: The open workbook.
+    """
+    count = len(wb._pivots)
+    for ws in wb.worksheets:
+        ws._pivots = []
+    if count:
+        wb._pivots = []
+        print(f"  Removed {count} pivot tables and their cached source data.")
+
+
+def drop_defined_names(wb: openpyxl.Workbook) -> None:
+    """Remove the named ranges.
+
+    A defined name is a label on a range, and the label is written by
+    hand — often after whatever the range is about, which is a name of
+    the kind this tool exists to remove. It stays that way whether or not
+    the cells below it still say the same. Some of them point into other
+    workbooks and carry that path with them.
+
+    They are only removed where the formulas have been resolved to their
+    results — nothing reads a name in a workbook that no longer computes
+    anything. In ``keep`` mode they stay, because removing them would
+    break every formula that uses one.
+
+    Args:
+        wb: The open workbook.
+    """
+    count = len(wb.defined_names)
+    if count:
+        for name in list(wb.defined_names):
+            del wb.defined_names[name]
+        print(f"  Removed {count} named ranges; their names are written by hand.")
+    for ws in wb.worksheets:
+        local = len(ws.defined_names)
+        if local:
+            for name in list(ws.defined_names):
+                del ws.defined_names[name]
+            print(f"  Removed {local} named ranges local to a sheet.")
+
+
 def check_every_sheet_is_accounted_for(
     wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
 ) -> None:
@@ -759,6 +833,8 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
     check_patterns_reach_one_shape(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
 
     demote_query_tables(wb)
+    drop_external_links(wb)
+    drop_pivot_caches(wb)
     clear_document_properties(wb)
 
     if config.get("comments", "drop") == "drop":
@@ -768,6 +844,7 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
 
     if formulas == "values":
         clear_calculated_columns(wb)
+        drop_defined_names(wb)
 
     full_mapping: dict[str, dict[str, str]] = {}
 

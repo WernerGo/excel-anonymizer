@@ -356,7 +356,14 @@ def test_include_numbers_says_so_explicitly(excel_with_formulas, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_a_defined_name_pointing_at_a_removed_sheet_goes_with_it(tmp_path):
-    """Otherwise Excel asks about links on every open and cannot resolve them."""
+    """Otherwise Excel asks about links on every open and cannot resolve them.
+
+    Written in `keep` mode, because that is the only mode in which a
+    defined name survives at all: where the formulas are resolved they
+    all go, names being hand-written labels that say what a range is
+    about. What this guards is the other thing — that removing a sheet
+    does not leave a name pointing into nothing.
+    """
     from openpyxl.workbook.defined_name import DefinedName
 
     wb = openpyxl.Workbook()
@@ -368,7 +375,7 @@ def test_a_defined_name_pointing_at_a_removed_sheet_goes_with_it(tmp_path):
     path = tmp_path / "book.xlsx"
     wb.save(path)
 
-    config = write_config(tmp_path, {"ignore_sheets": ["Overview"], "groups": []})
+    config = write_config(tmp_path, {"formulas": "keep", "ignore_sheets": ["Overview"], "groups": []})
     anonymize(path, config)
 
     out = openpyxl.load_workbook(path.with_stem(path.stem + "_anonymized"))
@@ -953,3 +960,120 @@ def test_the_scratch_area_beyond_the_named_columns_may_differ(excel_with_a_tab_o
     anonymize(excel_with_a_tab_out_of_line, config)
 
     assert "differ in their header row" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# What a workbook keeps about other workbooks
+# ---------------------------------------------------------------------------
+
+def _with_a_link_to_another_workbook(path: Path) -> None:
+    """Give the workbook at `path` one external link, cache and all.
+
+    A link records three things and every one of them is a leak: where
+    the other file was, what its ranges are called, and the values last
+    read from it. The PE tracker carries thirty such links.
+    """
+    from openpyxl.packaging.relationship import Relationship
+    from openpyxl.workbook.external_link.external import (
+        ExternalBook, ExternalCell, ExternalDefinedName, ExternalLink,
+        ExternalRow, ExternalSheetData, ExternalSheetDataSet, ExternalSheetNames,
+    )
+
+    wb = openpyxl.load_workbook(path)
+    book = ExternalBook(
+        sheetNames=ExternalSheetNames(sheetName=["Rates"]),
+        definedNames=[ExternalDefinedName(name="Gamma_Commitment", refersTo="Rates!$A$1")],
+        sheetDataSet=ExternalSheetDataSet(sheetData=[
+            ExternalSheetData(sheetId=0, row=[
+                ExternalRow(r=1, cell=[ExternalCell(r="A1", t="str", v="Gamma Holdings AG")])
+            ])
+        ]),
+    )
+    link = ExternalLink(externalBook=book)
+    link.file_link = Relationship(
+        Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath",
+        Target="/Users/someone/Desktop/Rates.xlsx",
+        TargetMode="External",
+    )
+    wb._external_links = [link]
+    wb.save(path)
+
+
+def test_links_to_other_workbooks_are_removed(tmp_path):
+    """Nothing in the run would ever have looked at them: the cells being
+    replaced are in this workbook, and a cache is not a cell."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.append(["contact"])
+    wb.active.append(["Smith"])
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+    _with_a_link_to_another_workbook(path)
+
+    config = write_config(
+        tmp_path,
+        {"groups": [{"name": "people", "prefix": "PERSON",
+                     "columns": [{"sheet": "Data", "col": "A", "data_from_row": 2}]}]},
+    )
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    assert not openpyxl.load_workbook(out_path)._external_links
+    with zipfile.ZipFile(out_path) as archive:
+        stored = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"Gamma Holdings AG" not in stored, "the value it had cached"
+    assert b"Gamma_Commitment" not in stored, "what the other workbook called the range"
+    assert b"someone/Desktop" not in stored, "where that workbook stood, and whose desktop it was"
+
+
+def test_named_ranges_go_with_the_formulas(tmp_path):
+    """A name is written by hand and says what the range is about. Once
+    the formulas are resolved nothing reads it any more."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.append(["amount"])
+    wb.active.append([1000])
+    wb.defined_names.add(openpyxl.workbook.defined_name.DefinedName("Gamma_Commitment", attr_text="Data!$A$2"))
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    assert not openpyxl.load_workbook(out_path).defined_names
+    with zipfile.ZipFile(out_path) as archive:
+        stored = b"".join(archive.read(name) for name in archive.namelist())
+    assert b"Gamma_Commitment" not in stored
+
+
+def test_named_ranges_stay_where_the_formulas_do(tmp_path):
+    """In `keep` mode removing them would break every formula that uses one."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Data"
+    wb.active.append(["amount"])
+    wb.active.append([1000])
+    wb.defined_names.add(openpyxl.workbook.defined_name.DefinedName("Commitment", attr_text="Data!$A$2"))
+    path = tmp_path / "book.xlsx"
+    wb.save(path)
+
+    config = write_config(tmp_path, {"formulas": "keep", "keep_sheets": ["Data"], "groups": []})
+    anonymize(path, config)
+
+    out_path = path.with_stem(path.stem + "_anonymized")
+    assert "Commitment" in openpyxl.load_workbook(out_path).defined_names
+
+
+def test_pivot_tables_go_with_their_cached_source(tmp_path):
+    """A pivot table draws from a copy of the source range stored beside
+    it, not from the sheet. Anonymising the sheet leaves that copy."""
+    from anonymize import drop_pivot_caches
+
+    wb = openpyxl.Workbook()
+    wb._pivots = ["cache of the original rows"]
+    wb.active._pivots = ["the table drawn from it"]
+
+    drop_pivot_caches(wb)
+
+    assert wb._pivots == []
+    assert wb.active._pivots == []

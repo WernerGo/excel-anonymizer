@@ -233,6 +233,24 @@ says so:
     columns: [...]
 ```
 
+### What a workbook keeps outside its cells
+
+A run replaces cell values, and a comparison of cell values is what
+anyone would check it with. Both miss everything an `.xlsx` stores
+beside the cells, so these are removed without being asked:
+
+| what | what it holds |
+|---|---|
+| hyperlinks | the address behind a replaced cell |
+| cell comments | prose, which cannot be checked for names cheaply |
+| document properties | author, company, and any custom property |
+| links to other workbooks | where the other file stood, what its ranges are called, and the values last read from it |
+| pivot tables | a copy of the source range, drawn from instead of the sheet |
+| defined names | hand-written labels that say what a range is about — removed only where the formulas have been resolved, since in `keep` mode a formula still uses them |
+
+The list is not a guess: every entry was found in a file that had already
+passed a cell-by-cell comparison.
+
 ## faker_replace.py — realistic fake data
 
 Replaces values with realistic fake names, cities, companies etc. via [Faker](https://faker.readthedocs.io/). Same original value always gets the same fake replacement.
