@@ -64,6 +64,11 @@ uv run src/anonymize.py input.xlsx --config examples/config_names.yaml
 
 Output: `input_anonymized.xlsx` next to the original.
 
+An `.xlsm` is read like an `.xlsx` and written as one: openpyxl does not
+carry the macro project over, so an `.xlsm` output would declare itself
+macro-enabled and hold no macros — the file Excel offers to repair. What
+a derived dataset is wanted for is the data, not the automation.
+
 Config:
 
 ```yaml

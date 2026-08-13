@@ -708,11 +708,33 @@ def apply_scale_group(wb: openpyxl.Workbook, group: dict) -> None:
     print(f"  Group '{group['name']}': {len(replacements)} numbers scaled by {factor}{note}.")
 
 
+def output_path(excel_path: Path, suffix: str) -> Path:
+    """Where the anonymised copy is written.
+
+    A macro-enabled workbook is never written back as one. openpyxl does
+    not carry the macro project over, so an ``.xlsm`` output would
+    declare itself macro-enabled and hold no macros — the file Excel
+    offers to repair. The derived dataset does not need them either: what
+    is taken over from it is data, not automation.
+
+    Args:
+        excel_path: Path to the input Excel file (``.xlsx`` or ``.xlsm``).
+        suffix: What to append to the stem, from ``output_suffix``.
+
+    Returns:
+        The output path, always with an ``.xlsx`` extension.
+    """
+    out_path = excel_path.with_stem(excel_path.stem + suffix)
+    if out_path.suffix.lower() == ".xlsm":
+        out_path = out_path.with_suffix(".xlsx")
+    return out_path
+
+
 def anonymize(excel_path: Path, config_path: Path) -> None:
     """Replace configured cell values with stable keys and optionally save the mapping.
 
     Args:
-        excel_path: Path to the input Excel file (.xlsx).
+        excel_path: Path to the input Excel file (``.xlsx`` or ``.xlsm``).
         config_path: Path to the YAML config defining groups, prefixes, and columns.
     """
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -720,7 +742,9 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
     suffix = config.get("output_suffix", "_anonymized")
     map_file = config.get("save_mapping")
     formulas = config.get("formulas", "values")
-    out_path = excel_path.with_stem(excel_path.stem + suffix)
+    out_path = output_path(excel_path, suffix)
+    if excel_path.suffix.lower() == ".xlsm":
+        print(f"  Macro-enabled input: the copy is written as {out_path.name}, without the macros.")
 
     wb = load_source(excel_path, formulas)
 
@@ -776,7 +800,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Anonymize Excel files by replacing cell values with unique keys"
     )
-    parser.add_argument("excel", type=Path, help="Input Excel file (.xlsx)")
+    parser.add_argument("excel", type=Path, help="Input Excel file (.xlsx or .xlsm)")
     _base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent.parent
     parser.add_argument(
         "--config", type=Path,
@@ -787,6 +811,9 @@ def main() -> None:
 
     if not args.excel.exists():
         print(f"ERROR: file not found: {args.excel}")
+        raise SystemExit(1)
+    if args.excel.suffix.lower() not in (".xlsx", ".xlsm"):
+        print(f"ERROR: only .xlsx and .xlsm are supported: {args.excel}")
         raise SystemExit(1)
     if not args.config.exists():
         print(f"ERROR: config not found: {args.config}")

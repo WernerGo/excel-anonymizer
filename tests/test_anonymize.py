@@ -5,7 +5,7 @@ import openpyxl
 import pytest
 from pathlib import Path
 
-from anonymize import anonymize
+from anonymize import anonymize, output_path
 
 
 def _load_output(excel_path: Path, suffix: str) -> openpyxl.worksheet.worksheet.Worksheet:
@@ -124,3 +124,31 @@ def test_roundtrip_restores_original_values(sample_excel, anon_config):
     for row in range(1, 4):
         for col in range(1, 5):
             assert original.cell(row, col).value == restored.cell(row, col).value
+
+
+# ---------------------------------------------------------------------------
+# Where the copy is written
+# ---------------------------------------------------------------------------
+
+def test_an_xlsx_keeps_its_extension(tmp_path):
+    assert output_path(tmp_path / "book.xlsx", "_anonymised").name == "book_anonymised.xlsx"
+
+
+def test_an_xlsm_is_written_as_an_xlsx(tmp_path):
+    """openpyxl does not carry the macro project over, so an .xlsm output
+    would claim to be macro-enabled and hold no macros — the file Excel
+    offers to repair."""
+    assert output_path(tmp_path / "book.xlsm", "_anonymised").name == "book_anonymised.xlsx"
+
+
+def test_a_macro_workbook_produces_a_readable_copy(sample_excel, anon_config):
+    macro_file = sample_excel.with_suffix(".xlsm")
+    macro_file.write_bytes(sample_excel.read_bytes())
+
+    anonymize(macro_file, anon_config)
+
+    out = macro_file.with_stem(macro_file.stem + "_anonymized").with_suffix(".xlsx")
+    assert out.exists()
+    assert not macro_file.with_stem(macro_file.stem + "_anonymized").exists()
+    ws = openpyxl.load_workbook(out)["Sheet1"]
+    assert ws.cell(2, 1).value.startswith("LAST"), "the data was anonymised as usual"
