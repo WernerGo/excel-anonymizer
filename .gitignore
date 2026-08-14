@@ -1,5 +1,9 @@
-# Mapping files contain original (real) values – never commit
-*_map.json
+# Anything written about a real workbook – never commit. A mapping file
+# holds the original values outright; a manifest from inspect_excel.py
+# holds the sheet names and the range names, and those are written by
+# hand and say what the file is about. No JSON in this repo is meant to
+# be tracked, so the rule is the whole extension.
+*.json
 
 # Generated and anonymized output files
 *.xlsx
