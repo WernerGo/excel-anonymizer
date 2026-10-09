@@ -152,3 +152,82 @@ def test_a_macro_workbook_produces_a_readable_copy(sample_excel, anon_config):
     assert not macro_file.with_stem(macro_file.stem + "_anonymized").exists()
     ws = openpyxl.load_workbook(out)["Sheet1"]
     assert ws.cell(2, 1).value.startswith("LAST"), "the data was anonymised as usual"
+
+
+# ---------------------------------------------------------------------------
+# A configuration that no longer fits the file
+# ---------------------------------------------------------------------------
+
+def _config_with_missing_sheets(tmp_path: Path) -> Path:
+    """Three groups, four column entries, three of them naming sheets that are gone."""
+    import yaml
+    config = {
+        "output_suffix": "_anonymized",
+        "groups": [
+            {
+                "name": "last_names",
+                "prefix": "LAST",
+                "columns": [
+                    {"sheet": "Sheet1", "col": "A", "data_from_row": 2},
+                    {"sheet": "positions", "col": "B", "data_from_row": 2},
+                ],
+            },
+            {
+                "name": "first_names",
+                "prefix": "FIRST",
+                "columns": [{"sheet": "positions", "col_from": "C", "data_from_row": 2}],
+            },
+            {
+                "name": "amounts",
+                "strategy": "scale",
+                "factor": 1.2,
+                "columns": [{"sheet": "transfer", "col": "D", "data_from_row": 2}],
+            },
+        ],
+    }
+    path = tmp_path / "stale_config.yaml"
+    path.write_text(yaml.dump(config), encoding="utf-8")
+    return path
+
+
+def test_every_missing_sheet_is_named_not_only_the_first(sample_excel, tmp_path, capsys):
+    """A delivery that moved five things must not take five runs to find out.
+
+    The run still stops — a column entry that reaches nothing leaves the
+    values it was meant to replace in the file — but it stops after
+    holding the whole configuration against the workbook.
+    """
+    config = _config_with_missing_sheets(tmp_path)
+
+    with pytest.raises(ValueError) as caught:
+        anonymize(sample_excel, config)
+
+    printed = capsys.readouterr().out
+    assert "'positions'" in printed
+    assert "'transfer'" in printed
+    assert "last_names, column B" in printed
+    assert "first_names, column C onwards" in printed
+    assert "amounts, column D" in printed
+    assert "2 sheets" in str(caught.value)
+
+
+def test_nothing_is_written_when_the_configuration_does_not_fit(sample_excel, tmp_path):
+    """Half an anonymized file is worse than none."""
+    config = _config_with_missing_sheets(tmp_path)
+
+    with pytest.raises(ValueError):
+        anonymize(sample_excel, config)
+
+    assert not output_path(sample_excel, "_anonymized").exists()
+
+
+def test_a_configuration_that_fits_is_not_reported(sample_excel, anon_config):
+    """The check has to stay quiet when there is nothing to say."""
+    import yaml
+    from anonymize import unreachable_columns
+    import openpyxl as _openpyxl
+
+    wb = _openpyxl.load_workbook(sample_excel)
+    config = yaml.safe_load(anon_config.read_text(encoding="utf-8"))
+
+    assert unreachable_columns(wb, config) == {}

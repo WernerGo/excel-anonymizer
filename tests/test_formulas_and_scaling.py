@@ -610,12 +610,18 @@ def test_a_pattern_that_matches_nothing_stops_the_run(excel_with_many_tabs, tmp_
             ],
         },
     )
-    with pytest.raises(ValueError, match="matches no sheet"):
+    with pytest.raises(ValueError, match="match no sheet in the file"):
         anonymize(excel_with_many_tabs, config)
 
 
 def test_a_named_sheet_that_is_absent_from_a_group_stops_the_run(excel_with_many_tabs, tmp_path):
-    """A sheet renamed between exports leaves its column unhandled."""
+    """A sheet renamed between exports leaves its column unhandled.
+
+    The stop comes from `check_every_column_reaches_a_sheet` since
+    9.10.2026 — it holds the whole configuration against the workbook
+    before anything is written, so the message counts the entries that
+    broke rather than naming the first one reached.
+    """
     config = write_config(
         tmp_path,
         {
@@ -629,7 +635,7 @@ def test_a_named_sheet_that_is_absent_from_a_group_stops_the_run(excel_with_many
             ],
         },
     )
-    with pytest.raises(ValueError, match="matches no sheet"):
+    with pytest.raises(ValueError, match="match no sheet in the file"):
         anonymize(excel_with_many_tabs, config)
 
 

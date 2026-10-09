@@ -611,6 +611,86 @@ def scale_value(value: object, factor: float) -> object | None:
     return int(round(scaled)) if isinstance(value, int) else round(scaled, 6)
 
 
+def unreachable_columns(wb: openpyxl.Workbook, config: dict) -> dict[str, list[str]]:
+    """Return every column entry whose sheet is not in the workbook.
+
+    Keyed by what the entry names — a sheet or a pattern — with the
+    groups and columns that refer to it, so one reading of the output is
+    enough to repair the configuration.
+
+    **Why this is collected and not raised at the first one.** A delivery
+    arrives with sheets renamed, merged or gone, and the configuration
+    then names several that are not there. Stopping at the first turns
+    one repair into as many runs as there are broken entries, and each
+    run takes as long as the file is large. The caller reports all of
+    them at once and writes nothing.
+
+    `ignore_sheets` and `keep_sheets` are not checked here. An entry of
+    theirs that matches nothing removes or keeps nothing, which is
+    harmless, and `matching_sheets` already says so as it goes.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+
+    Returns:
+        ``{what the entry names: [group and column, …]}``, empty when
+        every entry reaches a sheet.
+    """
+    missing: dict[str, list[str]] = {}
+    for group in config.get("groups", []):
+        for col_spec in group.get("columns", []):
+            if not isinstance(col_spec, dict):
+                continue
+            if matching_sheets(wb, col_spec, warn_if_absent=False):
+                continue
+            where = col_spec.get("sheet") or col_spec.get("sheet_pattern") or "empty: true"
+            described = col_spec.get("col") or f"{col_spec.get('col_from')} onwards"
+            missing.setdefault(str(where), []).append(f"{group.get('name', '?')}, column {described}")
+    return missing
+
+
+def check_every_column_reaches_a_sheet(wb: openpyxl.Workbook, config: dict) -> None:
+    """Report every column entry that reaches no sheet, then stop.
+
+    **The run stops, and that is deliberate.** A column entry matching
+    nothing is the one mistake this tool cannot survive quietly: the
+    values it was meant to replace stay in the file, and every other
+    check still passes. The structural comparison finds no difference
+    because nothing moved, and the residual check only looks at text.
+
+    What changed on 9.10.2026 is not whether it stops but when. It used
+    to stop inside the first group that happened to reach a missing
+    sheet, so a delivery whose structure had moved in five places took
+    five runs to find out. Now the whole configuration is held against
+    the file first, and nothing is written until it fits.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+
+    Raises:
+        ValueError: If any column entry matches no sheet.
+    """
+    missing = unreachable_columns(wb, config)
+    if not missing:
+        return
+
+    entries = sum(len(refs) for refs in missing.values())
+    columns = "column entry" if entries == 1 else "column entries"
+    sheets = "sheet" if len(missing) == 1 else "sheets"
+    print(f"  {entries} {columns} refer to {len(missing)} {sheets} this file does not have:")
+    for where, refs in sorted(missing.items()):
+        print(f"    {where!r}")
+        for ref in refs:
+            print(f"        {ref}")
+    print("  Nothing has been written. The file may have renamed or dropped these sheets.")
+    raise ValueError(
+        f"{entries} {columns} in the configuration match no sheet in the file "
+        f"({len(missing)} {sheets}); nothing would be replaced there."
+    )
+
+
 def iter_cells(wb: openpyxl.Workbook, columns: list[dict], group_name: str = "") -> list[tuple]:
     """Yield every cell of the configured columns as (worksheet, row, column).
 
@@ -621,6 +701,12 @@ def iter_cells(wb: openpyxl.Workbook, columns: list[dict], group_name: str = "")
     finds no difference because nothing moved, and the residual check
     only looks at text — so a mistyped pattern over a sheet full of
     amounts goes through unseen. It did, once.
+
+    **`check_every_column_reaches_a_sheet` reaches this first** and
+    reports every such entry together. The guard below stays as the
+    thing that makes the rule true rather than merely checked: a caller
+    that builds its own configuration and skips the check still cannot
+    write a half-anonymized file.
 
     Args:
         wb: The open workbook.
@@ -829,6 +915,7 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             print("           Open the source in Excel, let it recalculate, save, and run again.")
 
     drop_sheets(wb, config.get("ignore_sheets", []))
+    check_every_column_reaches_a_sheet(wb, config)
     check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
     check_patterns_reach_one_shape(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
 
