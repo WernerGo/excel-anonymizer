@@ -208,7 +208,8 @@ def test_every_missing_sheet_is_named_not_only_the_first(sample_excel, tmp_path,
     assert "last_names, column B" in printed
     assert "first_names, column C onwards" in printed
     assert "amounts, column D" in printed
-    assert "2 sheets" in str(caught.value)
+    assert "3 column entries match no sheet in the file (2 sheets)" in printed
+    assert "match no sheet in the file" in str(caught.value)
 
 
 def test_nothing_is_written_when_the_configuration_does_not_fit(sample_excel, tmp_path):
@@ -231,3 +232,58 @@ def test_a_configuration_that_fits_is_not_reported(sample_excel, anon_config):
     config = yaml.safe_load(anon_config.read_text(encoding="utf-8"))
 
     assert unreachable_columns(wb, config) == {}
+
+
+def test_both_kinds_of_problem_are_reported_in_one_run(sample_excel, tmp_path, capsys):
+    """A new delivery is wrong in more than one way at once.
+
+    TF6 on 9.10.2026: three entries of `ignore_sheets` naming sheets that
+    are gone, column entries reaching nothing, and seven sheets nobody
+    has decided about. The run stopped at the second kind, so the third
+    was never reached and the list the repair needs took three runs to
+    assemble.
+    """
+    import yaml
+    config = {
+        "output_suffix": "_anonymized",
+        "unlisted_sheets": "fail",
+        "groups": [
+            {
+                "name": "last_names",
+                "prefix": "LAST",
+                "columns": [{"sheet": "positions", "col": "A", "data_from_row": 2}],
+            }
+        ],
+    }
+    path = tmp_path / "two_kinds.yaml"
+    path.write_text(yaml.dump(config), encoding="utf-8")
+
+    with pytest.raises(ValueError) as caught:
+        anonymize(sample_excel, path)
+
+    printed = capsys.readouterr().out
+    assert "match no sheet in the file" in printed      # the column entry
+    assert "in no group and not in ignore_sheets" in printed  # Sheet1, unaccounted for
+    assert "match no sheet in the file" in str(caught.value)
+    assert "unaccounted for" in str(caught.value)
+
+
+def test_the_names_of_unlisted_sheets_stay_in_the_file(sample_excel, tmp_path, capsys):
+    """A sheet is often named after the transaction it holds.
+
+    The report says how many and where the list is; it does not print
+    the names. What it does print is the sheets named in the
+    *configuration*, which are ours.
+    """
+    import yaml
+    config = {
+        "output_suffix": "_anonymized",
+        "unlisted_sheets": "fail",
+        "groups": [{"name": "n", "prefix": "N", "columns": [{"sheet": "Sheet1", "col": "A"}]}],
+    }
+    path = tmp_path / "all_listed.yaml"
+    path.write_text(yaml.dump(config), encoding="utf-8")
+
+    anonymize(sample_excel, path)
+
+    assert "Sheet1" not in capsys.readouterr().out.split("Input :")[-1].split("Config:")[-1]

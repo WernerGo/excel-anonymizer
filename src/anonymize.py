@@ -445,7 +445,7 @@ def drop_defined_names(wb: openpyxl.Workbook) -> None:
 
 def check_every_sheet_is_accounted_for(
     wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
-) -> None:
+) -> list[str]:
     """Report sheets that neither a group nor `ignore_sheets` mentions.
 
     A configuration is written against the file you had. The next export
@@ -489,21 +489,23 @@ def check_every_sheet_is_accounted_for(
 
     unlisted = [name for name in wb.sheetnames if name not in named]
     if not unlisted:
-        return
+        return []
 
     listing = excel_path.with_name(f"{excel_path.stem}_unlisted_sheets.txt")
     listing.write_text("\n".join(unlisted) + "\n", encoding="utf-8")
 
-    print(f"  {len(unlisted)} sheets are in the file but in no group and not in ignore_sheets.")
-    print(f"  Their names are in {listing.name}, beside the workbook.")
-    if mode == "fail":
-        raise ValueError(
-            f"{len(unlisted)} sheets are unaccounted for; list them in a group or in ignore_sheets. "
-            f"See {listing.name}."
-        )
+    return [
+        f"{len(unlisted)} sheets are in the file but in no group and not in ignore_sheets.",
+        f"  Their names are in {listing.name}, beside the workbook — see the docstring",
+        "  for why they are not printed here.",
+        f"  List them in a group or in ignore_sheets." if mode == "fail" else
+        "  `unlisted_sheets: warn`, so the run goes on.",
+    ]
 
 
-def check_patterns_reach_one_shape(wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path) -> None:
+def check_patterns_reach_one_shape(
+    wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
+) -> list[str]:
     """Check that the sheets a pattern matches all have the same header row.
 
     A pattern plus a column letter is a bet: that every sheet the pattern
@@ -567,16 +569,16 @@ def check_patterns_reach_one_shape(wb: openpyxl.Workbook, config: dict, mode: st
             odd.extend(differing)
 
     if not odd:
-        return
+        return []
 
     listing = excel_path.with_name(f"{excel_path.stem}_differing_sheets.txt")
     listing.write_text("\n".join(odd) + "\n", encoding="utf-8")
-    print(f"  Their names are in {listing.name}, beside the workbook.")
-    if mode == "fail":
-        raise ValueError(
-            f"{len(odd)} sheets do not have the layout their pattern assumes; "
-            f"address them separately. See {listing.name}."
-        )
+    return [
+        f"{len(odd)} sheets do not have the layout their pattern assumes.",
+        f"  Their names are in {listing.name}, beside the workbook.",
+        "  Address them separately." if mode == "fail" else
+        "  `unlisted_sheets: warn`, so the run goes on.",
+    ]
 
 
 def _header(ws, columns: list[int]) -> tuple:
@@ -650,7 +652,7 @@ def unreachable_columns(wb: openpyxl.Workbook, config: dict) -> dict[str, list[s
     return missing
 
 
-def check_every_column_reaches_a_sheet(wb: openpyxl.Workbook, config: dict) -> None:
+def check_every_column_reaches_a_sheet(wb: openpyxl.Workbook, config: dict) -> list[str]:
     """Report every column entry that reaches no sheet, then stop.
 
     **The run stops, and that is deliberate.** A column entry matching
@@ -674,21 +676,82 @@ def check_every_column_reaches_a_sheet(wb: openpyxl.Workbook, config: dict) -> N
     """
     missing = unreachable_columns(wb, config)
     if not missing:
-        return
+        return []
 
     entries = sum(len(refs) for refs in missing.values())
     columns = "column entry" if entries == 1 else "column entries"
     sheets = "sheet" if len(missing) == 1 else "sheets"
-    print(f"  {entries} {columns} refer to {len(missing)} {sheets} this file does not have:")
+    lines = [f"{entries} {columns} match no sheet in the file ({len(missing)} {sheets}):"]
     for where, refs in sorted(missing.items()):
-        print(f"    {where!r}")
-        for ref in refs:
-            print(f"        {ref}")
-    print("  Nothing has been written. The file may have renamed or dropped these sheets.")
-    raise ValueError(
-        f"{entries} {columns} in the configuration match no sheet in the file "
-        f"({len(missing)} {sheets}); nothing would be replaced there."
-    )
+        lines.append(f"  {where!r}")
+        lines.extend(f"      {ref}" for ref in refs)
+    return lines
+
+
+def check_the_configuration_fits(
+    wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
+) -> None:
+    """Hold the whole configuration against the file, and report it once.
+
+    Three things can be wrong between a configuration and the delivery it
+    meets, and a new delivery is usually wrong in more than one of them:
+
+    1. a column entry names a sheet the file does not have
+    2. the file has a sheet nothing accounts for
+    3. a pattern reaches sheets that do not share a layout
+
+    **They are collected and reported together.** Each used to raise on
+    its own, so a file whose structure had moved took one run per kind to
+    uncover — and the second kind was never reached while the first was
+    outstanding. What whoever runs this needs is the list, in one
+    reading, so that one pass over the configuration can repair it.
+
+    **Names of sheets are not printed.** In a workbook of this kind a
+    sheet is often named after the transaction it holds, so the list of
+    sheets nobody has decided about is itself confidential. It goes into
+    a file beside the workbook, and this report says which. The sheets
+    named in the *configuration* are printed, because they are ours.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+        mode: ``warn`` or ``fail``, for the second and third kind.
+        excel_path: The input file; listings are written beside it.
+
+    Raises:
+        ValueError: If anything fatal was found. A column entry that
+            reaches nothing always is; the other two follow ``mode``.
+    """
+    unreachable = check_every_column_reaches_a_sheet(wb, config)
+    unlisted = check_every_sheet_is_accounted_for(wb, config, mode, excel_path)
+    differing = check_patterns_reach_one_shape(wb, config, mode, excel_path)
+
+    found = [block for block in (unreachable, unlisted, differing) if block]
+    if not found:
+        return
+
+    print()
+    print(f"  The configuration does not fit {excel_path.name}:")
+    for block in found:
+        print()
+        for line in block:
+            print(f"    {line}")
+    print()
+
+    # The wording of each reason is the one the single checks used to
+    # raise with, so what a reader greps for still finds it.
+    fatal = []
+    if unreachable:
+        fatal.append("column entries match no sheet in the file")
+    if mode == "fail" and unlisted:
+        fatal.append("sheets are unaccounted for")
+    if mode == "fail" and differing:
+        fatal.append("sheets do not have the layout their pattern assumes")
+    if not fatal:
+        return
+
+    print("  Nothing has been written.")
+    raise ValueError("The configuration does not fit the file: " + "; ".join(fatal) + ".")
 
 
 def iter_cells(wb: openpyxl.Workbook, columns: list[dict], group_name: str = "") -> list[tuple]:
@@ -915,9 +978,7 @@ def anonymize(excel_path: Path, config_path: Path) -> None:
             print("           Open the source in Excel, let it recalculate, save, and run again.")
 
     drop_sheets(wb, config.get("ignore_sheets", []))
-    check_every_column_reaches_a_sheet(wb, config)
-    check_every_sheet_is_accounted_for(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
-    check_patterns_reach_one_shape(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
+    check_the_configuration_fits(wb, config, config.get("unlisted_sheets", "warn"), excel_path)
 
     demote_query_tables(wb)
     drop_external_links(wb)
