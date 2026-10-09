@@ -287,3 +287,62 @@ def test_the_names_of_unlisted_sheets_stay_in_the_file(sample_excel, tmp_path, c
     anonymize(sample_excel, path)
 
     assert "Sheet1" not in capsys.readouterr().out.split("Input :")[-1].split("Config:")[-1]
+
+
+def test_a_column_entry_that_finds_nothing_stops_the_run(sample_excel, tmp_path, capsys):
+    """A list that has moved looks exactly like this.
+
+    `ig_statics` was rebuilt between two deliveries on 9.10.2026, the
+    company lists moved a few columns and gained a heading, and the
+    configuration went on naming the old letters. They were empty, so
+    the group replaced nothing — and nothing complained until somebody
+    read the derived file and found 1,624 LEIs in it.
+
+    **It does not stop the run.** A column that exists and holds nothing
+    is ordinary, and stopping on it would block every run for a
+    condition that is usually harmless. What was missing was that
+    anybody could see it.
+    """
+    import yaml
+    config = {
+        "output_suffix": "_anonymized",
+        "groups": [
+            {
+                "name": "last_names",
+                "prefix": "LAST",
+                "columns": [
+                    {"sheet": "Sheet1", "col": "A", "data_from_row": 2},
+                    {"sheet": "Sheet1", "col": "Z", "data_from_row": 2},
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "moved.yaml"
+    path.write_text(yaml.dump(config), encoding="utf-8")
+
+    anonymize(sample_excel, path)   # reported, not fatal
+
+    printed = capsys.readouterr().out
+    assert "group 'last_names'" in printed
+    assert "Sheet1 column Z" in printed
+    assert "Sheet1 column A" not in printed
+
+
+def test_an_entry_full_on_one_sheet_and_empty_on_another_is_not_reported(tmp_path):
+    """A scratch range is empty on some tabs and full on the next."""
+    import yaml
+    from anonymize import entries_that_reach_nothing
+
+    wb = openpyxl.Workbook()
+    full = wb.active
+    full.title = "1"
+    full.cell(1, 1, "h"); full.cell(2, 1, "Smith")
+    empty = wb.create_sheet("2")
+    empty.cell(1, 1, "h")
+    path = tmp_path / "tabs.xlsx"
+    wb.save(path)
+
+    config = {"groups": [{"name": "n", "prefix": "N",
+                          "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}]}]}
+
+    assert entries_that_reach_nothing(openpyxl.load_workbook(path), config) == {}

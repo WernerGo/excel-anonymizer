@@ -688,6 +688,77 @@ def check_every_column_reaches_a_sheet(wb: openpyxl.Workbook, config: dict) -> l
     return lines
 
 
+def entries_that_reach_nothing(wb: openpyxl.Workbook, config: dict) -> dict[str, list[str]]:
+    """Return every column entry whose whole reach holds no value.
+
+    The entry finds its sheet and its letters, and there is nothing in
+    them. That is what a list looks like after it has been moved: the
+    group runs, replaces nothing, and every other check passes.
+
+    **This is how 1,624 LEIs and 346 company names reached a derived
+    file** on 9.10.2026. `ig_statics` was rebuilt between two deliveries,
+    the company lists moved a few columns to the left and gained a
+    heading, and the configuration went on naming the letters they used
+    to sit at. Those letters were empty, so nothing was replaced and
+    nothing complained.
+
+    Counted over all the sheets an entry matches, so a range that is
+    empty on one tab and full on the next does not register. Only an
+    entry that touches no value anywhere is reported.
+
+    Args:
+        wb: The workbook, after the ignored sheets have been removed.
+        config: The parsed configuration.
+
+    Returns:
+        ``{group name: [column entries that reach nothing, …]}``.
+    """
+    empty: dict[str, list[str]] = {}
+    for group in config.get("groups", []):
+        for col_spec in group.get("columns", []):
+            if not isinstance(col_spec, dict):
+                continue
+            data_from = col_spec.get("data_from_row", 2)
+            found = False
+            for sheet_name in matching_sheets(wb, col_spec, warn_if_absent=False):
+                ws = wb[sheet_name]
+                for col_idx in column_range(col_spec, ws):
+                    for row_idx in range(data_from, ws.max_row + 1):
+                        if ws.cell(row_idx, col_idx).value not in (None, ""):
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+            if not found:
+                where = col_spec.get("sheet") or col_spec.get("sheet_pattern") or "empty: true"
+                described = col_spec.get("col") or f"{col_spec.get('col_from')} onwards"
+                empty.setdefault(group.get("name", "?"), []).append(f"{where} column {described}")
+    return empty
+
+
+def check_every_entry_reaches_a_value(wb: openpyxl.Workbook, config: dict) -> list[str]:
+    """Report the column entries that reach a sheet and find nothing in it."""
+    empty = entries_that_reach_nothing(wb, config)
+    if not empty:
+        return []
+
+    total = sum(len(v) for v in empty.values())
+    entries = "column entry" if total == 1 else "column entries"
+    lines = [f"{total} {entries} reach their sheet and find nothing in it:"]
+    for name, refs in sorted(empty.items()):
+        lines.append(f"  group {name!r}")
+        lines.extend(f"      {ref}" for ref in refs)
+    lines.append("  A list that has moved looks exactly like this. Check where its values")
+    lines.append("  are now; if the column is empty on purpose, take the entry out.")
+    lines.append("  **This does not stop the run.** A column that exists and holds nothing")
+    lines.append("  is ordinary — TF2 and TF8 have no pending commitments to name — and")
+    lines.append("  stopping on it would block every run for a condition that is usually")
+    lines.append("  harmless. It is printed because nobody saw the one that was not.")
+    return lines
+
+
 def check_the_configuration_fits(
     wb: openpyxl.Workbook, config: dict, mode: str, excel_path: Path
 ) -> None:
@@ -697,8 +768,9 @@ def check_the_configuration_fits(
     meets, and a new delivery is usually wrong in more than one of them:
 
     1. a column entry names a sheet the file does not have
-    2. the file has a sheet nothing accounts for
-    3. a pattern reaches sheets that do not share a layout
+    2. a column entry finds its sheet and nothing in it
+    3. the file has a sheet nothing accounts for
+    4. a pattern reaches sheets that do not share a layout
 
     **They are collected and reported together.** Each used to raise on
     its own, so a file whose structure had moved took one run per kind to
@@ -719,14 +791,18 @@ def check_the_configuration_fits(
         excel_path: The input file; listings are written beside it.
 
     Raises:
-        ValueError: If anything fatal was found. A column entry that
-            reaches nothing always is; the other two follow ``mode``.
+        ValueError: If anything fatal was found. A column entry matching
+            no sheet always is; the unlisted and pattern checks follow
+            ``mode``. An entry that reaches a sheet and finds nothing in
+            it is reported and does not stop the run — see
+            `check_every_entry_reaches_a_value`.
     """
     unreachable = check_every_column_reaches_a_sheet(wb, config)
+    nothing_there = check_every_entry_reaches_a_value(wb, config)
     unlisted = check_every_sheet_is_accounted_for(wb, config, mode, excel_path)
     differing = check_patterns_reach_one_shape(wb, config, mode, excel_path)
 
-    found = [block for block in (unreachable, unlisted, differing) if block]
+    found = [block for block in (unreachable, nothing_there, unlisted, differing) if block]
     if not found:
         return
 
