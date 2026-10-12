@@ -903,13 +903,45 @@ def column_range(col_spec: dict, ws) -> range:
     """
     if "col" in col_spec:
         index = openpyxl.utils.column_index_from_string(col_spec["col"])
-        return range(index, index + 1)
+        covered = range(index, index + 1)
+    else:
+        first = openpyxl.utils.column_index_from_string(col_spec["col_from"])
+        last = ws.max_column
+        if "col_to" in col_spec:
+            last = min(last, openpyxl.utils.column_index_from_string(col_spec["col_to"]))
+        covered = range(first, last + 1)
+    return _without_the_named_headings(covered, col_spec, ws)
 
-    first = openpyxl.utils.column_index_from_string(col_spec["col_from"])
-    last = ws.max_column
-    if "col_to" in col_spec:
-        last = min(last, openpyxl.utils.column_index_from_string(col_spec["col_to"]))
-    return range(first, last + 1)
+
+def _without_the_named_headings(covered, col_spec: dict, ws):
+    """Drop the columns whose heading the entry names in ``except_headers``.
+
+    A range says *everything right of here*, and sometimes one column
+    inside it has to be left alone. Addressing it by letter does not
+    work: a cashflow tab's `ignore.percentagePIKmargin` stands at AN in
+    93 of TF8's 120 tabs and at AK, AM, AS or AY in eight more, so a
+    letter would spare it in most tabs and replace it in the rest.
+
+    Named by its heading it is found wherever it stands, and a tab that
+    does not have it is simply unaffected.
+
+    The heading is read from the row above ``data_from_row``, which is
+    where the entry already says the data begins.
+    """
+    headings = col_spec.get("except_headers")
+    if not headings:
+        return covered
+    spared = {str(name).strip().lower() for name in headings}
+    header_row = col_spec.get("data_from_row", 2) - 1
+    if header_row < 1:
+        return covered
+    kept = []
+    for index in covered:
+        value = ws.cell(row=header_row, column=index).value
+        heading = "" if value is None else str(value).strip().lower()
+        if heading not in spared:
+            kept.append(index)
+    return kept
 
 
 def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:

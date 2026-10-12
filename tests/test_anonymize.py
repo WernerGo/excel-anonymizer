@@ -346,3 +346,46 @@ def test_an_entry_full_on_one_sheet_and_empty_on_another_is_not_reported(tmp_pat
                           "columns": [{"sheet_pattern": r"\d+", "col": "A", "data_from_row": 2}]}]}
 
     assert entries_that_reach_nothing(openpyxl.load_workbook(path), config) == {}
+
+
+def test_a_column_entry_can_spare_a_heading_by_name():
+    """A range says *everything right of here*, except what it names.
+
+    TF8's cashflow tabs hold `ignore.percentagePIKmargin` inside the
+    scratch area, and the migration reads it. Swept with the rest, ten of
+    its cells came out as a key and the database refused six PIK steps
+    for a rate that is not a number (12.10.2026). A letter will not spare
+    it — the column stands at AN in 93 of 120 tabs and elsewhere in eight
+    more — so the entry names the heading.
+    """
+    from anonymize import column_range
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["a", "b", "ignore.percentagePIKmargin", "d"])
+    sheet.append([1, 2, 3, 4])
+
+    everything = list(column_range({"col_from": "B", "data_from_row": 2}, sheet))
+    spared = list(
+        column_range(
+            {"col_from": "B", "data_from_row": 2, "except_headers": ["ignore.percentagePIKmargin"]},
+            sheet,
+        )
+    )
+
+    assert everything == [2, 3, 4]
+    assert spared == [2, 4]
+
+
+def test_a_spared_heading_is_found_wherever_it_stands():
+    """The point of naming it: the tabs do not agree on where it sits."""
+    from anonymize import column_range
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["a", "pik", "c", "d"])
+    sheet.append([1, 2, 3, 4])
+
+    spared = list(column_range({"col_from": "A", "data_from_row": 2, "except_headers": ["PIK"]}, sheet))
+
+    assert spared == [1, 3, 4], "matched without regard to case or position"
