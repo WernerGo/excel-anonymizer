@@ -389,3 +389,26 @@ def test_a_spared_heading_is_found_wherever_it_stands():
     spared = list(column_range({"col_from": "A", "data_from_row": 2, "except_headers": ["PIK"]}, sheet))
 
     assert spared == [1, 3, 4], "matched without regard to case or position"
+
+
+def test_a_formula_error_is_not_given_a_key():
+    """It names nobody, and a key over it hides a defect of the file.
+
+    Six cells of the PE tracker's `BNP ID` hold `#N/A`. Keyed like the
+    rest of that column, the derived file showed six well-formed
+    identifiers and the migration run against it reported nothing; the
+    run against the real file reported all six (13.10.2026).
+    """
+    from anonymize import apply_key_group
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "t"
+    sheet.append(["id"])
+    sheet.append(["#N/A"])
+    sheet.append(["a real one"])
+
+    apply_key_group(book, {"name": "ids", "prefix": "ID", "columns": [{"sheet": "t", "col": "A", "data_from_row": 2}]})
+
+    assert sheet["A2"].value == "#N/A"
+    assert sheet["A3"].value == "ID0001"

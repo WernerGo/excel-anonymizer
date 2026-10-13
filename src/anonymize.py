@@ -26,6 +26,9 @@ from pathlib import Path
 import openpyxl
 import yaml
 
+EXCEL_ERRORS = frozenset({"#DIV/0!", "#VALUE!", "#N/A", "#REF!", "#NAME?", "#NULL!", "#NUM!"})
+"""What Excel writes into a cell whose formula did not work."""
+
 FORMULA_MODES = ("values", "keep")
 
 
@@ -981,6 +984,17 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
             continue
         val = str(cell.value).strip() if cell.value is not None else ""
         if not val or val in ("None", "nan"):
+            continue
+        if val in EXCEL_ERRORS:
+            # What a formula leaves behind when it does not work. It names
+            # nobody, so there is nothing to replace — and replacing it
+            # hides a defect of the file behind a well-formed key.
+            #
+            # Six cells of the PE tracker's `BNP ID` hold `#N/A`. Keyed
+            # like everything else in that column, the derived file showed
+            # six valid-looking identifiers, and the migration run against
+            # it reported nothing. The run against the real file reported
+            # all six (13.10.2026).
             continue
         if val not in mapping:
             mapping[val] = f"{prefix}{len(mapping) + 1:04d}"
