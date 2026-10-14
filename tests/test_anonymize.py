@@ -444,3 +444,26 @@ def test_two_spellings_of_one_identifier_get_one_key():
     assert sheet["A2"].value == sheet["B2"].value
     assert sheet["A3"].value == sheet["B3"].value
     assert sheet["A2"].value != sheet["A3"].value
+
+
+def test_a_value_without_digits_still_gets_a_key():
+    """`match_on: digits` must not become a way of leaving a value in the file."""
+    from anonymize import apply_key_group
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "t"
+    sheet.append(["a"])
+    sheet.append(["BGLLLULLXXX"])
+
+    apply_key_group(
+        book,
+        {
+            "name": "accounts",
+            "prefix": "ACCOUNT",
+            "match_on": "digits",
+            "columns": [{"sheet": "t", "col": "A", "data_from_row": 2}],
+        },
+    )
+
+    assert sheet["A2"].value == "ACCOUNT0001"

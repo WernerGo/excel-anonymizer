@@ -1004,8 +1004,9 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
         # each spelling gets a key of its own and the derived file can no
         # longer be joined (14.10.2026).
         key = "".join(c for c in val if c.isdigit()) if on_digits else val
-        if not key:
-            continue
+        # A value with no digit at all keys on itself. Skipping it would
+        # leave it in the file, and this tool exists to leave nothing.
+        key = key or val
         if key not in mapping:
             mapping[key] = f"{prefix}{len(mapping) + 1:04d}"
         replacements.append((ws, row_idx, col_idx, mapping[key]))
