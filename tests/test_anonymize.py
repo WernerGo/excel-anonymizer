@@ -412,3 +412,34 @@ def test_a_formula_error_is_not_given_a_key():
 
     assert sheet["A2"].value == "#N/A"
     assert sheet["A3"].value == "ID0001"
+
+
+def test_two_spellings_of_one_identifier_get_one_key():
+    """`Cash Balances` writes an account as a number, `Accounts` as an IBAN.
+
+    32 of the tracker's 39 balances find their account, and only on the
+    digits. Keyed on the string, each spelling gets a key of its own and
+    the derived file can no longer be joined (14.10.2026).
+    """
+    from anonymize import apply_key_group
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "t"
+    sheet.append(["a", "b"])
+    sheet.append(["123456", "LU00 1234 56"])
+    sheet.append(["999", "999"])
+
+    apply_key_group(
+        book,
+        {
+            "name": "accounts",
+            "prefix": "ACCOUNT",
+            "match_on": "digits",
+            "columns": [{"sheet": "t", "col_from": "A", "col_to": "B", "data_from_row": 2}],
+        },
+    )
+
+    assert sheet["A2"].value == sheet["B2"].value
+    assert sheet["A3"].value == sheet["B3"].value
+    assert sheet["A2"].value != sheet["A3"].value

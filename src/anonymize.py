@@ -963,6 +963,7 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
     prefix = group["prefix"]
     numbers_too = group.get("include_numbers", False)
     dates_too = group.get("include_dates", False)
+    on_digits = group.get("match_on") == "digits"
     mapping: dict[str, str] = OrderedDict()
     replacements: list[tuple] = []
 
@@ -996,9 +997,18 @@ def apply_key_group(wb: openpyxl.Workbook, group: dict) -> dict[str, str]:
             # it reported nothing. The run against the real file reported
             # all six (13.10.2026).
             continue
-        if val not in mapping:
-            mapping[val] = f"{prefix}{len(mapping) + 1:04d}"
-        replacements.append((ws, row_idx, col_idx, mapping[val]))
+        # `match_on: digits` keys two spellings of one identifier alike.
+        # The PE tracker writes an account as a plain number in `Cash
+        # Balances` and as an IBAN in `Accounts`; 32 of 39 balances find
+        # their account, and only on the digits. Keyed on the string,
+        # each spelling gets a key of its own and the derived file can no
+        # longer be joined (14.10.2026).
+        key = "".join(c for c in val if c.isdigit()) if on_digits else val
+        if not key:
+            continue
+        if key not in mapping:
+            mapping[key] = f"{prefix}{len(mapping) + 1:04d}"
+        replacements.append((ws, row_idx, col_idx, mapping[key]))
 
     for ws, row_idx, col_idx, new_val in replacements:
         cell = ws.cell(row=row_idx, column=col_idx)
