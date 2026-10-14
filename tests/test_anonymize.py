@@ -415,11 +415,12 @@ def test_a_formula_error_is_not_given_a_key():
 
 
 def test_two_spellings_of_one_identifier_get_one_key():
-    """`Cash Balances` writes an account as a number, `Accounts` as an IBAN.
+    """`Cash Balances` and `Accounts` write one account two ways.
 
-    32 of the tracker's 39 balances find their account, and only on the
-    digits. Keyed on the string, each spelling gets a key of its own and
-    the derived file can no longer be joined (14.10.2026).
+    All 32 balances that find their account differ in spelling — 20
+    characters against 24, with the same digits. Keyed on the string,
+    each spelling gets a key of its own and the derived file can no
+    longer be joined (14.10.2026).
     """
     from anonymize import apply_key_group
 
@@ -427,8 +428,8 @@ def test_two_spellings_of_one_identifier_get_one_key():
     sheet = book.active
     sheet.title = "t"
     sheet.append(["a", "b"])
-    sheet.append(["123456", "LU00 1234 56"])
-    sheet.append(["999", "999"])
+    sheet.append(["LU001234567890123456", "LU00 1234 5678 9012 3456"])
+    sheet.append(["LU009999999999999999", "LU00 9999 9999 9999 9999"])
 
     apply_key_group(
         book,
